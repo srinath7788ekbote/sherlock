@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# NewRelic MCP
+profiles/profiles.json
+cache/
+*.log
+
+# Logs directory (user home)
+logs/
+
+# Keyring
+*.keyring
+
+# MyPy
+.mypy_cache/
+
+# Pytest
+.pytest_cache/
+
+# Ruff
+.ruff_cache/

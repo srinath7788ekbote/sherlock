@@ -1,0 +1,14 @@
+[
+  {
+    "name": "production",
+    "account_id": "1234567",
+    "region": "US",
+    "created_at": "2025-01-15T10:30:00Z"
+  },
+  {
+    "name": "staging",
+    "account_id": "7654321",
+    "region": "US",
+    "created_at": "2025-01-15T10:35:00Z"
+  }
+]

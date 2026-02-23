@@ -1,0 +1,33 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.analysis.typeCheckingMode": "basic",
+    "python.testing.pytestArgs": [
+        "tests",
+        "-v"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+        }
+    },
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/.mypy_cache": true,
+        "**/.ruff_cache": true
+    },
+    "github.copilot.chat.mcpServers": {
+        "sherlock": {
+            "command": "python",
+            "args": [
+                "main.py"
+            ],
+            "cwd": "${workspaceFolder}"
+        }
+    }
+}
