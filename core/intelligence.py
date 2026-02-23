@@ -379,6 +379,7 @@ class APMIntelligence(BaseModel):
     """Intelligence about APM services in the account."""
 
     service_names: list[str] = Field(default_factory=list)
+    service_guids: dict[str, str] = Field(default_factory=dict)
     service_languages: dict[str, str] = Field(default_factory=dict)
     naming_pattern: str = ""
     top_error_classes: list[str] = Field(default_factory=list)
@@ -1360,6 +1361,9 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
                 name = ent.get("name", "")
                 if name:
                     intel.apm.service_names.append(name)
+                    guid = ent.get("guid", "")
+                    if guid:
+                        intel.apm.service_guids[name] = guid
                 tags = {t["key"]: t.get("values", []) for t in ent.get("tags", [])}
                 lang = tags.get("language", [""])[0] if tags.get("language") else ""
                 if lang:

@@ -12,6 +12,7 @@ import time
 
 from client.newrelic import get_client
 from core.context import AccountContext
+from core.deeplinks import get_builder as _get_deeplink_builder
 from core.exceptions import MonitorNotFoundError
 from core.sanitize import fuzzy_resolve_monitor, sanitize_service_name
 
@@ -376,6 +377,29 @@ async def get_monitor_status(
             "diagnosis": diagnosis,
             "duration_ms": duration_ms,
         }
+
+        # Deep links — only when monitor is NOT passing.
+        if diagnosis != "PASSING":
+            try:
+                _builder = _get_deeplink_builder()
+                if _builder and monitor_meta:
+                    _guid = monitor_meta.guid
+                    _pass_nrql = (
+                        f"SELECT percentage(count(*), WHERE result = 'SUCCESS') as pass_rate "
+                        f"FROM SyntheticCheck WHERE monitorName = '{safe_name}' "
+                        f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
+                    )
+                    response["links"] = {
+                        "monitor": _builder.synthetic_monitor(_guid),
+                        "failed_results": _builder.synthetic_results(
+                            _guid, since_minutes, "FAILED"
+                        ),
+                        "pass_rate_chart": _builder.nrql_chart(
+                            _pass_nrql, since_minutes
+                        ),
+                    }
+            except Exception:
+                pass
 
         return json.dumps(response)
 
@@ -781,7 +805,31 @@ async def investigate_synthetic(
         )
 
         duration_ms = int((time.time() - start) * 1000)
-        return json.dumps({
+
+        # Deep links for investigate_synthetic — always included.
+        _invest_links: dict | None = None
+        try:
+            _builder = _get_deeplink_builder()
+            if _builder and monitor_meta:
+                _guid = monitor_meta.guid
+                _svc_attr = intelligence.logs.service_attribute or "service.name"
+                _invest_links = {
+                    "monitor": _builder.synthetic_monitor(_guid),
+                    "failed_results": _builder.synthetic_results(
+                        _guid, since_minutes, "FAILED"
+                    ),
+                    "correlated_logs": (
+                        _builder.log_search(
+                            associated_service, _svc_attr, "ERROR", since_minutes
+                        )
+                        if associated_service
+                        else None
+                    ),
+                }
+        except Exception:
+            pass
+
+        _result: dict = {
             "monitor": {
                 "name": resolved_name,
                 "type": monitor_type,
@@ -798,7 +846,11 @@ async def investigate_synthetic(
             "recent_failure_details": recent_failures[:10],
             "location_breakdown": by_location,
             "duration_ms": duration_ms,
-        })
+        }
+        if _invest_links:
+            _result["links"] = _invest_links
+
+        return json.dumps(_result)
 
     except Exception as exc:
         return json.dumps({

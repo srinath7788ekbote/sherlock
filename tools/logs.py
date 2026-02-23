@@ -12,6 +12,7 @@ import time
 
 from client.newrelic import get_client
 from core.context import AccountContext
+from core.deeplinks import get_builder as _get_deeplink_builder
 from core.sanitize import fuzzy_resolve_service, sanitize_nrql_string, sanitize_service_name
 
 logger = logging.getLogger("sherlock.tools.logs")
@@ -134,6 +135,22 @@ async def search_logs(
         if was_fuzzy and resolved_name:
             response["resolved_from"] = service_name
             response["note"] = f"Fuzzy matched '{service_name}' → '{resolved_name}'"
+
+        # Deep links — only when errors were found.
+        if len(logs) > 0 and resolved_name:
+            try:
+                _builder = _get_deeplink_builder()
+                if _builder:
+                    response["links"] = {
+                        "view_in_nr": _builder.log_search(
+                            resolved_name, svc_attr, severity, since_minutes
+                        ),
+                        "error_logs": _builder.log_search(
+                            resolved_name, svc_attr, "ERROR", since_minutes
+                        ),
+                    }
+            except Exception:
+                pass
 
         return json.dumps(response)
 

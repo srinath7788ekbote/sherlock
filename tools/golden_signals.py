@@ -19,6 +19,7 @@ import httpx
 
 from client.newrelic import get_client
 from core.context import AccountContext
+from core.deeplinks import get_builder as _get_deeplink_builder
 from core.discovery import (
     EVENT_REGISTRY,
     AvailableEventType,
@@ -242,6 +243,36 @@ async def get_service_golden_signals(
             "duration_ms": duration_ms,
         }
 
+        # Deep links — only when health_signals is non-empty.
+        if signals:
+            try:
+                _builder = _get_deeplink_builder()
+                if _builder:
+                    _guid = intelligence.apm.service_guids.get(resolved_name)
+                    _err_nrql = (
+                        f"SELECT percentage(count(*), WHERE error IS true) as error_rate "
+                        f"FROM Transaction WHERE appName='{resolved_name}' "
+                        f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
+                    )
+                    _p95_nrql = (
+                        f"SELECT percentile(duration, 95) as p95 "
+                        f"FROM Transaction WHERE appName='{resolved_name}' "
+                        f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
+                    )
+                    _tput_nrql = (
+                        f"SELECT rate(count(*), 1 minute) as rpm "
+                        f"FROM Transaction WHERE appName='{resolved_name}' "
+                        f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
+                    )
+                    response["links"] = {
+                        "service_overview": _builder.entity_link(_guid) if _guid else None,
+                        "error_chart": _builder.nrql_chart(_err_nrql, since_minutes),
+                        "latency_chart": _builder.nrql_chart(_p95_nrql, since_minutes),
+                        "throughput_chart": _builder.nrql_chart(_tput_nrql, since_minutes),
+                    }
+            except Exception:
+                pass
+
         if was_fuzzy:
             response["resolved_from"] = service_name
             response["note"] = f"Fuzzy matched '{service_name}' → '{resolved_name}'"
@@ -368,6 +399,36 @@ async def _legacy_golden_signals(
         "error_timeseries": _strip_null_timeseries(error_ts),
         "duration_ms": duration_ms,
     }
+
+    # Deep links — only when health_signals is non-empty.
+    if signals:
+        try:
+            _builder = _get_deeplink_builder()
+            if _builder:
+                _guid = intelligence.apm.service_guids.get(resolved_name) if hasattr(intelligence, 'apm') else None
+                _err_nrql = (
+                    f"SELECT percentage(count(*), WHERE error IS true) as error_rate "
+                    f"FROM Transaction WHERE appName='{resolved_name}' "
+                    f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
+                )
+                _p95_nrql = (
+                    f"SELECT percentile(duration, 95) as p95 "
+                    f"FROM Transaction WHERE appName='{resolved_name}' "
+                    f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
+                )
+                _tput_nrql = (
+                    f"SELECT rate(count(*), 1 minute) as rpm "
+                    f"FROM Transaction WHERE appName='{resolved_name}' "
+                    f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
+                )
+                response["links"] = {
+                    "service_overview": _builder.entity_link(_guid) if _guid else None,
+                    "error_chart": _builder.nrql_chart(_err_nrql, since_minutes),
+                    "latency_chart": _builder.nrql_chart(_p95_nrql, since_minutes),
+                    "throughput_chart": _builder.nrql_chart(_tput_nrql, since_minutes),
+                }
+        except Exception:
+            pass
 
     if was_fuzzy:
         response["resolved_from"] = service_name

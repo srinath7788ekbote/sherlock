@@ -11,6 +11,7 @@ import time
 
 from client.newrelic import get_client
 from core.context import AccountContext
+from core.deeplinks import get_builder as _get_deeplink_builder
 from core.sanitize import fuzzy_resolve_service, sanitize_service_name
 
 logger = logging.getLogger("sherlock.tools.alerts")
@@ -142,6 +143,19 @@ async def get_incidents(state: str = "open") -> str:
         )
 
         duration_ms = int((time.time() - start) * 1000)
+
+        # Deep links — only for open/activated incidents.
+        if state.lower() == "open":
+            try:
+                _builder = _get_deeplink_builder()
+                if _builder:
+                    for inc in incidents:
+                        inc_id = inc.get("incidentId", inc.get("facet", ""))
+                        if inc_id:
+                            inc["deep_link"] = _builder.alert_incident(str(inc_id))
+            except Exception:
+                pass
+
         return json.dumps({
             "account_id": credentials.account_id,
             "state_filter": state,
@@ -201,6 +215,18 @@ async def get_service_incidents(service_name: str) -> str:
         )
 
         duration_ms = int((time.time() - start) * 1000)
+
+        # Deep links for each incident.
+        try:
+            _builder = _get_deeplink_builder()
+            if _builder:
+                for inc in incidents:
+                    inc_id = inc.get("incidentId", inc.get("facet", ""))
+                    if inc_id:
+                        inc["deep_link"] = _builder.alert_incident(str(inc_id))
+        except Exception:
+            pass
+
         response: dict = {
             "service_name": resolved_name,
             "total_incidents": len(incidents),

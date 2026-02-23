@@ -16,6 +16,7 @@ import httpx
 
 from client.newrelic import get_client
 from core.context import AccountContext
+from core.deeplinks import get_builder as _get_deeplink_builder
 from core.discovery import (
     EVENT_REGISTRY,
     AvailableEventType,
@@ -278,6 +279,37 @@ async def get_k8s_health(
             "duration_ms": duration_ms,
         }
 
+        # Deep links — only when health_signals is non-empty.
+        if signals:
+            try:
+                _builder = _get_deeplink_builder()
+                if _builder and resolved_ns:
+                    _bare_svc = resolved_svc or resolved_ns
+                    nc = intelligence.naming_convention
+                    if nc and getattr(nc, "separator", None) and resolved_svc:
+                        sep = nc.separator
+                        if sep in _bare_svc:
+                            if getattr(nc, "k8s_deployment_name_format", "full") == "bare":
+                                if getattr(nc, "env_position", None) == "prefix":
+                                    _bare_svc = _bare_svc.split(sep, 1)[1]
+                                elif getattr(nc, "env_position", None) == "suffix":
+                                    _bare_svc = _bare_svc.rsplit(sep, 1)[0]
+                    _restart_nrql = (
+                        f"SELECT sum(restartCount) as restarts "
+                        f"FROM K8sPodSample "
+                        f"WHERE namespaceName = '{resolved_ns}' "
+                        f"AND deploymentName LIKE '%{_bare_svc}%' "
+                        f"TIMESERIES 5 minutes "
+                        f"SINCE {since_minutes} minutes ago"
+                    )
+                    response["links"] = {
+                        "k8s_explorer": _builder.k8s_explorer(resolved_ns),
+                        "workload_view": _builder.k8s_workload(resolved_ns, _bare_svc),
+                        "restart_chart": _builder.nrql_chart(_restart_nrql, since_minutes),
+                    }
+            except Exception:
+                pass
+
         if was_fuzzy_ns:
             response["namespace_resolved_from"] = namespace
         if was_fuzzy_svc and service_name:
@@ -381,6 +413,37 @@ async def _legacy_k8s_health(
         "deployments": deployments,
         "duration_ms": duration_ms,
     }
+
+    # Deep links — only when health_signals is non-empty.
+    if signals:
+        try:
+            _builder = _get_deeplink_builder()
+            if _builder and resolved_ns:
+                _bare_svc = resolved_svc or resolved_ns
+                nc = intelligence.naming_convention
+                if nc and getattr(nc, "separator", None) and resolved_svc:
+                    sep = nc.separator
+                    if sep in _bare_svc:
+                        if getattr(nc, "k8s_deployment_name_format", "full") == "bare":
+                            if getattr(nc, "env_position", None) == "prefix":
+                                _bare_svc = _bare_svc.split(sep, 1)[1]
+                            elif getattr(nc, "env_position", None) == "suffix":
+                                _bare_svc = _bare_svc.rsplit(sep, 1)[0]
+                _restart_nrql = (
+                    f"SELECT sum(restartCount) as restarts "
+                    f"FROM K8sPodSample "
+                    f"WHERE namespaceName = '{resolved_ns}' "
+                    f"AND deploymentName LIKE '%{_bare_svc}%' "
+                    f"TIMESERIES 5 minutes "
+                    f"SINCE {since_minutes} minutes ago"
+                )
+                response["links"] = {
+                    "k8s_explorer": _builder.k8s_explorer(resolved_ns),
+                    "workload_view": _builder.k8s_workload(resolved_ns, _bare_svc),
+                    "restart_chart": _builder.nrql_chart(_restart_nrql, since_minutes),
+                }
+        except Exception:
+            pass
 
     if was_fuzzy_ns:
         response["namespace_resolved_from"] = namespace
