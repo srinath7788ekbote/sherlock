@@ -220,8 +220,8 @@ class TestAlertLinks:
     def test_alert_incident_format(self, builder_us):
         url = builder_us.alert_incident("12345")
         assert url is not None
-        assert "/alerts-ai/incidents/12345" in url
-        assert "accountId=123456" in url
+        assert "aiops.service.newrelic.com" in url
+        assert "/accounts/123456/incidents/12345/redirect" in url
 
 
 # ── Distributed traces tests ────────────────────────────────────────────
@@ -578,7 +578,7 @@ class TestAlertLinkInjection:
             assert data["total_incidents"] > 0
             inc = data["incidents"][0]
             assert "deep_link" in inc
-            assert "/alerts-ai/incidents/INC-001" in inc["deep_link"]
+            assert "/incidents/INC-001/redirect" in inc["deep_link"]
 
     @pytest.mark.asyncio
     async def test_incident_link_absent_for_closed_incidents(

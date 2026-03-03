@@ -24,6 +24,8 @@ logger = logging.getLogger("sherlock.deeplinks")
 NR_BASE_US = "https://one.newrelic.com"
 NR_BASE_EU = "https://one.eu.newrelic.com"
 
+NR_AIOPS_BASE = "https://aiops.service.newrelic.com"
+
 
 def _base(region: str) -> str:
     """Return the correct New Relic base URL for the given region."""
@@ -213,11 +215,11 @@ class DeepLinkBuilder:
     # ── Alert links ────────────────────────────────────────────────
 
     def alert_incident(self, incident_id: str) -> str | None:
-        """Open a specific alert incident."""
+        """Open a specific alert incident via the AIOPS redirect URL."""
         try:
             return (
-                f"{self._base}/alerts-ai/incidents/{incident_id}"
-                f"?accountId={self._account_id}"
+                f"{NR_AIOPS_BASE}/accounts/{self._account_id}"
+                f"/incidents/{incident_id}/redirect"
             )
         except Exception:
             return None
