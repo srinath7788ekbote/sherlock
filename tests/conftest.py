@@ -56,6 +56,11 @@ def mock_intelligence() -> AccountIntelligence:
                 "auth-service-prod",
                 "export-worker-prod",
             ],
+            service_guids={
+                "payment-svc-prod": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx",
+                "auth-service-prod": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwy",
+                "export-worker-prod": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwz",
+            },
             service_languages={
                 "payment-svc-prod": "java",
                 "auth-service-prod": "python",

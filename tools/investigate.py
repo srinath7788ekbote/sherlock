@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from core.context import AccountContext
 from core.credentials import Credentials
+from core.deeplinks import get_builder as _get_deeplink_builder
 from core.discovery import discover_available_data
 from core.query_builder import (
     build_investigation_queries,
@@ -724,6 +725,201 @@ def _generate_recommendations(
     return recommendations
 
 
+def _inject_finding_deep_links(
+    findings: list[dict],
+    anchor: InvestigationAnchor,
+    entity_guid: str | None,
+    effective_ns: str | None,
+    intelligence: Any,
+) -> None:
+    """Add a ``deep_link`` URL to each finding that has a matching rule.
+
+    Mutates *findings* in-place.  Never raises.
+    """
+    try:
+        builder = _get_deeplink_builder()
+        if builder is None:
+            return
+
+        service = anchor.primary_service
+        since = anchor.since_minutes
+        svc_attr = getattr(
+            getattr(intelligence, "logs", None), "service_attribute", "service.name"
+        ) or "service.name"
+
+        # Compute bare service name for K8s links.
+        bare_service = service
+        nc = getattr(intelligence, "naming_convention", None)
+        if nc and getattr(nc, "separator", None):
+            sep = nc.separator
+            if sep in service:
+                if getattr(nc, "k8s_deployment_name_format", "full") == "bare":
+                    if getattr(nc, "env_position", None) == "prefix":
+                        bare_service = service.split(sep, 1)[1]
+                    elif getattr(nc, "env_position", None) == "suffix":
+                        bare_service = service.rsplit(sep, 1)[0]
+
+        for finding in findings:
+            try:
+                source = finding.get("source", "").upper()
+                signal = finding.get("signal", "")
+                text = finding.get("finding", "")
+                link: str | None = None
+
+                if source == "APM":
+                    if "error_rate" in signal:
+                        nrql = (
+                            f"SELECT percentage(count(*), WHERE error IS true) "
+                            f"FROM Transaction WHERE appName='{service}' "
+                            f"TIMESERIES 5 minutes SINCE {since} minutes ago"
+                        )
+                        link = builder.spike_chart(nrql, since)
+                    elif "error_classes" in signal:
+                        if entity_guid:
+                            link = builder.apm_errors(entity_guid)
+                        else:
+                            nrql = (
+                                f"SELECT count(*) FROM TransactionError "
+                                f"WHERE appName='{service}' FACET errorClass "
+                                f"SINCE {since} minutes ago LIMIT 10"
+                            )
+                            link = builder.nrql_chart(nrql, since)
+                    elif "slow_queries" in signal:
+                        nrql = (
+                            f"SELECT average(duration), max(duration) "
+                            f"FROM DatastoreSegment WHERE appName='{service}' "
+                            f"FACET datastoreType, table "
+                            f"SINCE {since} minutes ago"
+                        )
+                        link = builder.nrql_chart(nrql, since)
+                    elif "external_calls" in signal:
+                        if entity_guid:
+                            link = builder.distributed_traces(entity_guid, since)
+
+                elif source == "K8S":
+                    ns = effective_ns or ""
+                    if any(k in signal for k in ("pod_status", "replica_health", "hpa_scaling")):
+                        if ns:
+                            link = builder.k8s_workload(ns, bare_service)
+                    elif any(k in signal for k in ("oom_kills", "resource_usage")):
+                        if ns:
+                            link = builder.k8s_workload(ns, bare_service)
+                    elif "k8s_events" in signal:
+                        link = builder.k8s_explorer(ns or None)
+
+                elif source == "LOGS":
+                    if signal == "error_logs":
+                        if "DEPENDENCY FAILURE" in text or "APPLICATION CRASH" in text:
+                            link = builder.log_search(
+                                service, svc_attr, "ERROR", since
+                            )
+
+                elif source == "SYNTHETICS":
+                    link = None  # synthetic links handled in synthetics.py
+
+                elif source == "ALERTS":
+                    pass  # handled in alerts.py
+
+                if link:
+                    finding["deep_link"] = link
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def _inject_recommendation_links(
+    recommendations: list[dict],
+    anchor: InvestigationAnchor,
+    entity_guid: str | None,
+    effective_ns: str | None,
+    intelligence: Any,
+) -> None:
+    """Add a ``links`` dict to each recommendation that has a matching rule.
+
+    Mutates *recommendations* in-place.  Never raises.
+    """
+    try:
+        builder = _get_deeplink_builder()
+        if builder is None:
+            return
+
+        service = anchor.primary_service
+        since = anchor.since_minutes
+        svc_attr = getattr(
+            getattr(intelligence, "logs", None), "service_attribute", "service.name"
+        ) or "service.name"
+
+        bare_service = service
+        nc = getattr(intelligence, "naming_convention", None)
+        if nc and getattr(nc, "separator", None):
+            sep = nc.separator
+            if sep in service:
+                if getattr(nc, "k8s_deployment_name_format", "full") == "bare":
+                    if getattr(nc, "env_position", None) == "prefix":
+                        bare_service = service.split(sep, 1)[1]
+                    elif getattr(nc, "env_position", None) == "suffix":
+                        bare_service = service.rsplit(sep, 1)[0]
+
+        for rec in recommendations:
+            try:
+                priority = rec.get("priority", "")
+                area = rec.get("area", "").lower()
+                links: dict[str, str | None] = {}
+
+                if priority == "P1":
+                    if any(k in area for k in ("apm", "errors", "error")):
+                        err_nrql = (
+                            f"SELECT percentage(count(*), WHERE error IS true) "
+                            f"FROM Transaction WHERE appName='{service}' "
+                            f"TIMESERIES 5 minutes SINCE {since} minutes ago"
+                        )
+                        links["error_profile"] = builder.apm_errors(entity_guid) if entity_guid else None
+                        links["error_traces"] = builder.distributed_traces(entity_guid, since, error_only=True) if entity_guid else None
+                        links["error_chart"] = builder.spike_chart(err_nrql, since)
+
+                    if any(k in area for k in ("k8s", "memory", "oom")):
+                        ns = effective_ns or ""
+                        links["k8s_pods"] = builder.k8s_workload(ns, bare_service) if ns else None
+                        links["k8s_explorer"] = builder.k8s_explorer(ns or None)
+                        mem_nrql = (
+                            f"SELECT average(memoryUsedBytes)/1e6 as avg_mem_mb, "
+                            f"max(memoryUsedBytes)/1e6 as peak_mem_mb "
+                            f"FROM K8sContainerSample "
+                            f"WHERE deploymentName LIKE '%{bare_service}%' "
+                            f"TIMESERIES 5 minutes SINCE {since} minutes ago"
+                        )
+                        links["memory_chart"] = builder.nrql_chart(mem_nrql, since)
+
+                    if any(k in area for k in ("dependency", "external")):
+                        links["error_logs"] = builder.log_search(service, svc_attr, "ERROR", since)
+                        links["traces"] = builder.distributed_traces(entity_guid, since) if entity_guid else None
+
+                    if "crash" in area:
+                        ns = effective_ns or ""
+                        links["crash_logs"] = builder.log_search(service, svc_attr, "ERROR", since)
+                        links["pod_view"] = builder.k8s_workload(ns, bare_service) if ns else None
+
+                elif priority == "P2":
+                    if any(k in area for k in ("database", "latency")):
+                        links["transactions"] = builder.apm_transactions(entity_guid) if entity_guid else None
+                        sq_nrql = (
+                            f"SELECT average(duration), max(duration) "
+                            f"FROM DatastoreSegment WHERE appName='{service}' "
+                            f"FACET datastoreType, table "
+                            f"SINCE {since} minutes ago"
+                        )
+                        links["slow_queries"] = builder.nrql_chart(sq_nrql, since)
+
+                # Only attach if any link was produced.
+                if any(v is not None for v in links.values()):
+                    rec["links"] = links
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
 def _build_diagnosis_summary(
     anchor: InvestigationAnchor,
     findings: list[dict],
@@ -897,10 +1093,24 @@ async def investigate_service(
                     "finding": signal,
                 })
 
+        # ── DEEP LINKS ─────────────────────────────────────────
+
+        entity_guid = intelligence.apm.service_guids.get(
+            anchor.primary_service
+        )
+
+        _inject_finding_deep_links(
+            findings, anchor, entity_guid, effective_ns, intelligence
+        )
+
         # ── SYNTHESIS ──────────────────────────────────────────
 
         recommendations = _generate_recommendations(
             findings, anchor, discovery, raw_data
+        )
+
+        _inject_recommendation_links(
+            recommendations, anchor, entity_guid, effective_ns, intelligence
         )
 
         diagnosis_summary = _build_diagnosis_summary(
@@ -933,6 +1143,11 @@ async def investigate_service(
             {
                 "investigation_report": {
                     "service": anchor.primary_service,
+                    "service_overview": (
+                        _get_deeplink_builder().entity_link(entity_guid)
+                        if entity_guid and _get_deeplink_builder()
+                        else None
+                    ),
                     "input_received": service_name,
                     "all_services_investigated": all_candidates,
                     "window": {
