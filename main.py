@@ -1,7 +1,7 @@
 """
 Sherlock — main entry point.
 
-Registers all 20 MCP tools, configures logging, and starts the
+Registers all 21 MCP tools, configures logging, and starts the
 stdio-based MCP server. All tool responses are scrubbed for prompt
 injection before being returned to the client.
 """
@@ -26,7 +26,9 @@ from core.sanitize import scrub_tool_response
 
 # ── Load environment ─────────────────────────────────────────────────────
 
-load_dotenv()
+# Load .env relative to this file's directory (not cwd) so credentials
+# are found regardless of how the MCP server is launched.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # ── Directory setup ──────────────────────────────────────────────────────
 
@@ -84,6 +86,7 @@ audit_logger = logging.getLogger("sherlock.audit")
 
 from tools.alerts import get_alerts, get_incidents, get_service_incidents
 from tools.apm import get_apm_applications, get_app_metrics, get_deployments
+from tools.dependencies import get_service_dependencies
 from tools.entities import get_entity_guid
 from tools.golden_signals import get_service_golden_signals
 from tools.intelligence_tools import (
@@ -419,6 +422,41 @@ TOOLS: list[Tool] = [
             "required": ["nrql"],
         },
     ),
+    # 21. get_service_dependencies
+    Tool(
+        name="get_service_dependencies",
+        description=(
+            "Get upstream and downstream service dependencies for an APM service. "
+            "Shows which services call this service and which services it calls, "
+            "with health warnings for unhealthy dependencies."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "service_name": {
+                    "type": "string",
+                    "description": "APM service name to look up dependencies for",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["downstream", "upstream", "both"],
+                    "default": "both",
+                    "description": "Which direction of dependencies to return",
+                },
+                "include_external": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Include external (non-NR) endpoint dependencies",
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "default": 2,
+                    "description": "Maximum dependency depth (1-5)",
+                },
+            },
+            "required": ["service_name"],
+        },
+    ),
 ]
 
 # ── Tool dispatch map ────────────────────────────────────────────────────
@@ -444,6 +482,7 @@ TOOL_HANDLERS = {
     "get_incidents": get_incidents,
     "get_service_incidents": get_service_incidents,
     "run_nrql_query": run_nrql_query,
+    "get_service_dependencies": get_service_dependencies,
 }
 
 # ── MCP Server ───────────────────────────────────────────────────────────
@@ -575,10 +614,18 @@ async def _auto_connect_from_env() -> None:
     try:
         result = await connect_account(account_id, api_key, region)
         result_data = json.loads(result)
-        if result_data.get("data_available"):
-            logger.info("Auto-connect successful for account %s", account_id)
+        if result_data.get("status") == "connected":
+            logger.info(
+                "Auto-connect successful for account %s (%s)",
+                account_id,
+                result_data.get("account_name", ""),
+            )
         else:
-            logger.warning("Auto-connect returned: %s", result)
+            logger.warning(
+                "Auto-connect failed for account %s: %s",
+                account_id,
+                result_data.get("error", "unknown error"),
+            )
     except Exception as exc:
         logger.warning("Auto-connect failed: %s", exc)
 

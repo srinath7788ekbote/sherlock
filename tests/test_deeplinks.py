@@ -58,10 +58,14 @@ class TestNrqlChart:
         nrql = "SELECT count(*) FROM Transaction WHERE appName = 'my-svc' SINCE 30 minutes ago"
         url = builder_us.nrql_chart(nrql, 30)
         assert url is not None
-        # Spaces and special chars must be percent-encoded.
-        assert "%20" in url or "+" in url or "count" in url
-        assert "appName" in urllib.parse.unquote(url)
-        assert "query=" in url
+        # The query is inside a base64-encoded pane parameter.
+        assert "pane=" in url
+        # Decode pane and verify NRQL is embedded.
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert pane_json["initialNrqlValue"] == nrql
+        assert pane_json["initialActiveInterface"] == "nrqlEditor"
 
     def test_nrql_chart_us_region_uses_correct_base(self, builder_us):
         url = builder_us.nrql_chart("SELECT 1", 10)
@@ -77,11 +81,21 @@ class TestNrqlChart:
 
     def test_nrql_chart_contains_account_id(self, builder_us):
         url = builder_us.nrql_chart("SELECT 1", 10)
-        assert "accountId=123456" in url
+        assert "platform[accountId]=123456" in url
+        # Account ID also embedded in pane JSON.
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert pane_json["initialAccountId"] == 123456
 
     def test_nrql_chart_path(self, builder_us):
         url = builder_us.nrql_chart("SELECT 1", 10)
-        assert "/data-exploration/query-builder" in url
+        assert "/launcher/data-exploration.query-builder" in url
+        assert "pane=" in url
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert pane_json["nerdletId"] == "data-exploration.query-builder"
 
 
 # ── Entity link tests ────────────────────────────────────────────────────
@@ -127,39 +141,53 @@ class TestLogSearch:
             "my-svc", "service.name", "ERROR", 60
         )
         assert url is not None
-        decoded = urllib.parse.unquote(url)
-        assert "service.name:'my-svc'" in decoded
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert "service.name:'my-svc'" in pane_json["query"]
         # Must NOT contain hardcoded "app" as attribute.
-        assert "app:'" not in decoded
+        assert "app:'" not in pane_json["query"]
 
     def test_log_search_encodes_service_name_with_spaces(self, builder_us):
         url = builder_us.log_search(
             "My Service Name", "entity.name", None, 60
         )
         assert url is not None
-        # Raw space should be encoded.
-        assert "My%20Service%20Name" in url or "My+Service+Name" in url
+        # Service name is inside the base64 pane, not URL-encoded directly.
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert "My Service Name" in pane_json["query"]
 
     def test_log_search_with_severity_adds_level_filter(self, builder_us):
         url = builder_us.log_search(
             "svc", "service.name", "ERROR", 60
         )
-        decoded = urllib.parse.unquote(url)
-        assert "AND level:'ERROR'" in decoded
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert "AND level:'ERROR'" in pane_json["query"]
 
     def test_log_search_without_severity(self, builder_us):
         url = builder_us.log_search("svc", "service.name", None, 60)
-        decoded = urllib.parse.unquote(url)
-        assert "AND level:" not in decoded
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert "AND level:" not in pane_json["query"]
 
     def test_log_search_duration(self, builder_us):
         url = builder_us.log_search("svc", "service.name", None, 30)
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
         # 30 min * 60 * 1000 = 1800000
-        assert "duration=1800000" in url
+        assert pane_json["duration"] == 1800000
 
     def test_log_search_path(self, builder_us):
         url = builder_us.log_search("svc", "service.name", None, 10)
-        assert "/logger" in url
+        assert "/launcher/logger.log-tailer" in url
+        assert "platform[accountId]=" in url
+        assert "pane=" in url
 
 
 # ── K8s tests ────────────────────────────────────────────────────────────
@@ -362,7 +390,12 @@ class TestInvestigateLinkInjection:
         _inject_finding_deep_links(findings, anchor, guid, "payments-prod", intel)
 
         assert "deep_link" in findings[0]
-        assert "TIMESERIES" in urllib.parse.unquote(findings[0]["deep_link"])
+        # NRQL is now inside a base64-encoded pane parameter.
+        deep_link = findings[0]["deep_link"]
+        parsed = urllib.parse.urlparse(deep_link)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert "TIMESERIES" in pane_json["initialNrqlValue"]
 
     @pytest.mark.asyncio
     async def test_finding_has_no_deep_link_when_not_applicable(
