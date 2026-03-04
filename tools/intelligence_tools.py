@@ -14,6 +14,8 @@ import time
 from core.cache import IntelligenceCache
 from core.context import AccountContext
 from core.credentials import CredentialManager, Credentials
+from core.dependency_graph import load_graph, graph_is_stale
+from core.graph_builder import build_dependency_graph
 from core.intelligence import AccountIntelligence, learn_account
 
 logger = logging.getLogger("sherlock.tools.intelligence_tools")
@@ -46,6 +48,35 @@ async def _background_refresh(credentials: Credentials, account_id: str) -> None
     except Exception as exc:
         logger.warning(
             "Background cache refresh failed for account %s: %s", account_id, exc
+        )
+
+
+async def _build_graph_background(
+    credentials: Credentials,
+    intelligence: AccountIntelligence,
+) -> None:
+    """Background task to build the dependency graph after connect.
+
+    Non-blocking. On failure, logs a warning — never blocks connect_account.
+
+    Args:
+        credentials: Active account credentials.
+        intelligence: Learned AccountIntelligence.
+    """
+    try:
+        graph = await build_dependency_graph(credentials, intelligence)
+        logger.info(
+            "Background dependency graph built for account %s: "
+            "%d services, %d edges, %.1f%% coverage",
+            credentials.account_id,
+            graph.total_services,
+            graph.total_edges,
+            graph.coverage_pct,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Background dependency graph build failed for account %s: %s",
+            credentials.account_id, exc,
         )
 
 
@@ -118,6 +149,17 @@ async def connect_account(
         ctx = AccountContext()
         ctx.set_active(credentials, intelligence)
 
+        # Build / refresh dependency graph in the background.
+        dep_graph_status = "unavailable"
+        existing_graph = load_graph(account_id)
+        if existing_graph and not graph_is_stale(account_id):
+            dep_graph_status = "cached"
+        else:
+            asyncio.create_task(
+                _build_graph_background(credentials, intelligence)
+            )
+            dep_graph_status = "building"
+
         # Build synthetics summary.
         synth_enabled = [
             name for name, meta in intelligence.synthetics.monitor_map.items()
@@ -157,6 +199,7 @@ async def connect_account(
                 "key_transactions": intelligence.entity_counts.key_transaction_count,
                 "azure_resources": intelligence.entity_counts.azure_resource_count,
             },
+            "dependency_graph": dep_graph_status,
             "duration_ms": duration_ms,
         })
 

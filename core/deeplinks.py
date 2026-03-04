@@ -53,13 +53,24 @@ class DeepLinkBuilder:
         """Open the New Relic query builder with *nrql* pre-loaded.
 
         The NRQL must already contain the correct ``SINCE`` clause.
+        Uses the launcher path with a base64-encoded ``pane`` parameter
+        which is how NR1 nerdlets consume their initial configuration.
         """
         try:
-            encoded = urllib.parse.quote(nrql, safe="")
+            pane = json.dumps(
+                {
+                    "nerdletId": "data-exploration.query-builder",
+                    "initialActiveInterface": "nrqlEditor",
+                    "initialNrqlValue": nrql,
+                    "initialAccountId": int(self._account_id),
+                },
+                separators=(",", ":"),
+            )
+            pane_b64 = base64.b64encode(pane.encode()).decode()
             return (
-                f"{self._base}/data-exploration/query-builder"
-                f"?accountId={self._account_id}"
-                f"&query={encoded}"
+                f"{self._base}/launcher/data-exploration.query-builder"
+                f"?pane={pane_b64}"
+                f"&platform[accountId]={self._account_id}"
             )
         except Exception:
             return None
@@ -139,12 +150,20 @@ class DeepLinkBuilder:
             query = f"{service_attribute}:'{service_name}'"
             if severity:
                 query += f" AND level:'{severity}'"
-            encoded_query = urllib.parse.quote(query, safe="")
+            pane = json.dumps(
+                {
+                    "nerdletId": "logger.log-tailer",
+                    "accountId": int(self._account_id),
+                    "duration": since_minutes * 60 * 1000,
+                    "query": query,
+                },
+                separators=(",", ":"),
+            )
+            pane_b64 = base64.b64encode(pane.encode()).decode()
             return (
-                f"{self._base}/logger"
-                f"?accountId={self._account_id}"
-                f"&duration={since_minutes * 60 * 1000}"
-                f"&query={encoded_query}"
+                f"{self._base}/launcher/logger.log-tailer"
+                f"?pane={pane_b64}"
+                f"&platform[accountId]={self._account_id}"
             )
         except Exception:
             return None

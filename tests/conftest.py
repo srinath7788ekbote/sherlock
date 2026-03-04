@@ -15,6 +15,11 @@ import respx
 
 from core.context import AccountContext
 from core.credentials import Credentials
+from core.dependency_graph import (
+    DependencyGraph,
+    DependencyNode,
+    ServiceDependency,
+)
 from core.intelligence import (
     AccountIntelligence,
     AccountMeta,
@@ -364,3 +369,83 @@ def mock_golden_signals_critical():
         "errors": {"error_rate_pct": 45.2, "total_transactions": 100},
         "saturation": {"avg_cpu_pct": 95},
     })
+
+
+@pytest.fixture
+def mock_dependency_graph() -> DependencyGraph:
+    """Provide a mock DependencyGraph for testing.
+
+    Graph topology:
+      payment-svc-prod → auth-service-prod → export-worker-prod
+      payment-svc-prod → export-worker-prod (direct)
+    """
+    payment_to_auth = ServiceDependency(
+        caller="payment-svc-prod",
+        callee="auth-service-prod",
+        call_count=5000,
+        error_rate=2.5,
+        avg_latency_ms=150.0,
+        source="span",
+        confidence=1.0,
+    )
+    auth_to_export = ServiceDependency(
+        caller="auth-service-prod",
+        callee="export-worker-prod",
+        call_count=1200,
+        error_rate=15.0,
+        avg_latency_ms=8000.0,
+        source="span",
+        confidence=1.0,
+    )
+    payment_to_export = ServiceDependency(
+        caller="payment-svc-prod",
+        callee="export-worker-prod",
+        call_count=800,
+        error_rate=0.5,
+        avg_latency_ms=200.0,
+        source="span",
+        confidence=1.0,
+    )
+
+    payment_node = DependencyNode(
+        service_name="payment-svc-prod",
+        direct_dependencies=["auth-service-prod", "export-worker-prod"],
+        direct_dependents=[],
+        transitive_dependencies=["auth-service-prod", "export-worker-prod"],
+        dependency_details={
+            "auth-service-prod": payment_to_auth,
+            "export-worker-prod": payment_to_export,
+        },
+    )
+    auth_node = DependencyNode(
+        service_name="auth-service-prod",
+        direct_dependencies=["export-worker-prod"],
+        direct_dependents=["payment-svc-prod"],
+        transitive_dependencies=["export-worker-prod"],
+        dependency_details={
+            "export-worker-prod": auth_to_export,
+        },
+    )
+    export_node = DependencyNode(
+        service_name="export-worker-prod",
+        direct_dependencies=[],
+        direct_dependents=["payment-svc-prod", "auth-service-prod"],
+        transitive_dependencies=[],
+        dependency_details={},
+    )
+
+    return DependencyGraph(
+        account_id="123456",
+        total_services=3,
+        total_edges=3,
+        nodes={
+            "payment-svc-prod": payment_node,
+            "auth-service-prod": auth_node,
+            "export-worker-prod": export_node,
+        },
+        build_source="span",
+        coverage_pct=100.0,
+        external_dependencies={
+            "payment-svc-prod": ["stripe-api.com", "cdn.example.com"],
+        },
+    )

@@ -22,6 +22,12 @@ from pydantic import BaseModel, Field
 from core.context import AccountContext
 from core.credentials import Credentials
 from core.deeplinks import get_builder as _get_deeplink_builder
+from core.dependency_graph import (
+    DependencyGraph,
+    get_dependencies,
+    get_dependents,
+    load_graph,
+)
 from core.discovery import discover_available_data
 from core.query_builder import (
     build_investigation_queries,
@@ -302,6 +308,97 @@ def _analyze_incident_pattern(recent_incidents: list[dict]) -> IncidentPattern |
         consistent_cause=consistent_cause,
         pattern_summary="; ".join(summary_parts),
     )
+
+
+# ── Dependency Health Check ─────────────────────────────────────────────
+
+
+class DependencyHealthResult(BaseModel):
+    """Result of checking dependency health during investigation."""
+
+    checked: bool = False
+    """Whether dependency health was checked."""
+
+    graph_available: bool = False
+    """Whether a dependency graph was available."""
+
+    total_dependencies: int = 0
+    """Number of dependencies checked."""
+
+    unhealthy_dependencies: list[dict] = Field(default_factory=list)
+    """List of unhealthy dependency details."""
+
+    upstream_services: list[str] = Field(default_factory=list)
+    """Services that depend on the investigated service (blast radius)."""
+
+    warnings: list[str] = Field(default_factory=list)
+    """Any warnings from the check."""
+
+
+def _check_dependency_health(
+    service_name: str,
+    account_id: str,
+) -> DependencyHealthResult:
+    """Check the dependency health for a service being investigated.
+
+    Loads the dependency graph and checks if any downstream dependencies
+    have high error rates or latency.
+
+    Args:
+        service_name: The service being investigated.
+        account_id: New Relic account ID.
+
+    Returns:
+        DependencyHealthResult. Never raises.
+    """
+    result = DependencyHealthResult()
+
+    try:
+        graph = load_graph(account_id)
+        if not graph:
+            result.warnings.append("No dependency graph available")
+            return result
+
+        result.graph_available = True
+
+        # Get downstream dependencies.
+        downstream = get_dependencies(graph, service_name, max_depth=2)
+        result.total_dependencies = len(downstream)
+
+        # Check each dependency for health issues.
+        node = graph.nodes.get(service_name)
+        if node:
+            for dep_name in node.direct_dependencies:
+                detail = node.dependency_details.get(dep_name)
+                if not detail:
+                    continue
+
+                issues: list[str] = []
+                if detail.error_rate > 10.0:
+                    issues.append(f"error rate {detail.error_rate:.1f}%")
+                if detail.avg_latency_ms > 5000:
+                    issues.append(f"latency {detail.avg_latency_ms:.0f}ms")
+
+                if issues:
+                    result.unhealthy_dependencies.append({
+                        "service": dep_name,
+                        "issues": issues,
+                        "error_rate": detail.error_rate,
+                        "avg_latency_ms": detail.avg_latency_ms,
+                        "call_count": detail.call_count,
+                        "source": detail.source,
+                    })
+
+        # Get upstream services (blast radius).
+        result.upstream_services = get_dependents(graph, service_name)
+
+        result.checked = True
+
+    except Exception as exc:
+        logger.debug("Dependency health check failed: %s", exc)
+        result.warnings.append(f"Dependency check failed: {exc}")
+
+    return result
 
 
 async def _anchor_investigation(
@@ -707,6 +804,27 @@ def _generate_recommendations(
             "urgency": "SOON",
         })
 
+    # Unhealthy downstream dependency.
+    if "unhealthy dependency" in finding_lower:
+        dep_findings = [
+            f.get("finding", "") for f in findings
+            if "unhealthy dependency" in f.get("finding", "").lower()
+        ]
+        for dep_f in dep_findings:
+            dep_match = re.search(r"Unhealthy dependency: (\S+)", dep_f)
+            dep_name = dep_match.group(1) if dep_match else "unknown"
+            recommendations.append({
+                "priority": "P1",
+                "area": "dependency",
+                "finding": f"Downstream dependency {dep_name} is unhealthy.",
+                "action": (
+                    f"Investigate downstream service {dep_name}. "
+                    f"Use investigate_service or get_service_dependencies "
+                    f"to check its health and map its own dependencies."
+                ),
+                "urgency": "IMMEDIATE",
+            })
+
     # Recurring incident pattern.
     if anchor.incident_pattern and anchor.incident_pattern.is_recurring:
         recommendations.append({
@@ -925,6 +1043,7 @@ def _build_diagnosis_summary(
     findings: list[dict],
     recommendations: list[dict],
     domains_with_data: list[str],
+    dep_health: DependencyHealthResult | None = None,
 ) -> str:
     """Build a human-readable diagnosis summary."""
     parts: list[str] = []
@@ -952,6 +1071,19 @@ def _build_diagnosis_summary(
         parts.append(f"{len(warnings)} warning(s)")
     if not critical and not warnings:
         parts.append("No significant issues detected")
+
+    # Dependency info.
+    if dep_health and dep_health.checked:
+        if dep_health.unhealthy_dependencies:
+            unhealthy_names = [d["service"] for d in dep_health.unhealthy_dependencies]
+            parts.append(
+                f"{len(unhealthy_names)} unhealthy dependency(ies): "
+                f"{', '.join(unhealthy_names)}"
+            )
+        if dep_health.upstream_services:
+            parts.append(
+                f"Blast radius: {len(dep_health.upstream_services)} upstream service(s)"
+            )
 
     # Top recommendation.
     if recommendations:
@@ -1095,6 +1227,29 @@ async def investigate_service(
 
         # ── DEEP LINKS ─────────────────────────────────────────
 
+        # ── DEPENDENCY HEALTH CHECK ───────────────────────────
+
+        dep_health = _check_dependency_health(
+            anchor.primary_service, credentials.account_id,
+        )
+
+        # Inject dependency findings.
+        if dep_health.checked and dep_health.unhealthy_dependencies:
+            for unhealthy in dep_health.unhealthy_dependencies:
+                issues_str = ", ".join(unhealthy["issues"])
+                finding_text = (
+                    f"⚠️ Unhealthy dependency: {unhealthy['service']} "
+                    f"({issues_str})"
+                )
+                findings.append({
+                    "source": "DEPENDENCIES",
+                    "signal": "dependency_health",
+                    "severity": "WARNING",
+                    "finding": finding_text,
+                })
+
+        # ── DEEP LINK INJECTION ────────────────────────────────
+
         entity_guid = intelligence.apm.service_guids.get(
             anchor.primary_service
         )
@@ -1114,7 +1269,8 @@ async def investigate_service(
         )
 
         diagnosis_summary = _build_diagnosis_summary(
-            anchor, findings, recommendations, discovery.domains_with_data
+            anchor, findings, recommendations, discovery.domains_with_data,
+            dep_health,
         )
 
         # ── PATTERN ANALYSIS ───────────────────────────────────
@@ -1185,6 +1341,18 @@ async def investigate_service(
                     "active_incident": anchor.active_incident,
                 },
                 "pattern_analysis": pattern_analysis,
+                "dependency_analysis": {
+                    "checked": dep_health.checked,
+                    "graph_available": dep_health.graph_available,
+                    "total_dependencies": dep_health.total_dependencies,
+                    "unhealthy_dependencies": dep_health.unhealthy_dependencies,
+                    "upstream_services": dep_health.upstream_services,
+                    "blast_radius": len(dep_health.upstream_services),
+                    "warnings": dep_health.warnings,
+                } if dep_health.checked else {
+                    "checked": False,
+                    "note": "Dependency graph not available",
+                },
                 "findings": findings,
                 "prioritized_recommendations": recommendations,
                 "raw_data": raw_data,
