@@ -1,0 +1,8 @@
+# CODEOWNERS - specifies who must review and approve pull requests
+#
+# Each line is a file pattern followed by one or more owners.
+# The last matching pattern takes precedence.
+#
+# @ekbotesrinath must review and approve ALL pull requests to this repository.
+
+* @ekbotesrinath
