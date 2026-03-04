@@ -1,0 +1,18 @@
+name: Enforce PR on Main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  check-pr:
+    name: Require Pull Request
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Block direct push to main
+        run: |
+          echo "Direct pushes to main are not allowed."
+          echo "Please open a Pull Request and get it approved by @ekbotesrinath before merging."
+          exit 1
