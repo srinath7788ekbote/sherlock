@@ -335,6 +335,34 @@ class DependencyHealthResult(BaseModel):
     """Any warnings from the check."""
 
 
+def _resolve_graph_node(
+    service_name: str,
+    graph: DependencyGraph,
+) -> DependencyNode | None:
+    """Find the best matching node in the dependency graph.
+
+    Tries exact match first, then case-insensitive, then substring.
+    Never raises.
+    """
+    # Exact match.
+    node = graph.nodes.get(service_name)
+    if node:
+        return node
+
+    # Case-insensitive match.
+    lower = service_name.lower()
+    for key, n in graph.nodes.items():
+        if key.lower() == lower:
+            return n
+
+    # Substring match — e.g. "sifi-adapter" matching "eswd-prod/sifi-adapter".
+    for key, n in graph.nodes.items():
+        if lower in key.lower() or key.lower() in lower:
+            return n
+
+    return None
+
+
 def _check_dependency_health(
     service_name: str,
     account_id: str,
@@ -361,12 +389,16 @@ def _check_dependency_health(
 
         result.graph_available = True
 
-        # Get downstream dependencies.
-        downstream = get_dependencies(graph, service_name, max_depth=2)
+        # Fuzzy-resolve the node — handles mismatched service name formats
+        # (e.g. "sifi-adapter" vs "eswd-prod/sifi-adapter" in the graph).
+        node = _resolve_graph_node(service_name, graph)
+
+        # Get downstream dependencies using the resolved node name.
+        resolved_name = node.service_name if node else service_name
+        downstream = get_dependencies(graph, resolved_name, max_depth=2)
         result.total_dependencies = len(downstream)
 
         # Check each dependency for health issues.
-        node = graph.nodes.get(service_name)
         if node:
             for dep_name in node.direct_dependencies:
                 detail = node.dependency_details.get(dep_name)
@@ -390,7 +422,7 @@ def _check_dependency_health(
                     })
 
         # Get upstream services (blast radius).
-        result.upstream_services = get_dependents(graph, service_name)
+        result.upstream_services = get_dependents(graph, resolved_name)
 
         result.checked = True
 
@@ -1229,9 +1261,18 @@ async def investigate_service(
 
         # ── DEPENDENCY HEALTH CHECK ───────────────────────────
 
+        # The dependency graph is built in the background during
+        # connect_account.  If it hasn't finished yet, wait briefly
+        # so the investigation includes dependency data.
         dep_health = _check_dependency_health(
             anchor.primary_service, credentials.account_id,
         )
+        if not dep_health.graph_available:
+            # Graph may still be building — wait up to 5 s and retry once.
+            await asyncio.sleep(5)
+            dep_health = _check_dependency_health(
+                anchor.primary_service, credentials.account_id,
+            )
 
         # Inject dependency findings.
         if dep_health.checked and dep_health.unhealthy_dependencies:
