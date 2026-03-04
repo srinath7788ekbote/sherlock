@@ -18,15 +18,16 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 2. [Architecture](#architecture)
 3. [Prerequisites](#prerequisites)
 4. [Installation](#installation)
-5. [Configuration](#configuration)
-6. [Available Tools (20)](#available-tools-20)
-7. [Workflows](#workflows)
-8. [Security Model](#security-model)
-9. [Multi-Tenant Profiles](#multi-tenant-profiles)
-10. [Synthetics Deep-Dive](#synthetics-deep-dive)
-11. [Developer Guide](#developer-guide)
-12. [Troubleshooting](#troubleshooting)
-13. [License](#license)
+5. [Sharing with Teammates (Private Repository)](#sharing-with-teammates-private-repository)
+6. [Configuration](#configuration)
+7. [Available Tools (20)](#available-tools-20)
+8. [Workflows](#workflows)
+9. [Security Model](#security-model)
+10. [Multi-Tenant Profiles](#multi-tenant-profiles)
+11. [Synthetics Deep-Dive](#synthetics-deep-dive)
+12. [Developer Guide](#developer-guide)
+13. [Troubleshooting](#troubleshooting)
+14. [License](#license)
 
 ---
 
@@ -171,6 +172,66 @@ The server is pre-configured in `.vscode/settings.json`. After installation:
 2. Ensure the Python extension is installed
 3. The MCP server will appear under **GitHub Copilot → MCP Servers**
 4. Use `@sherlock` in Copilot Chat to interact with your telemetry
+
+---
+
+## Sharing with Teammates (Private Repository)
+
+You do **not** need to make this repository public for your team to use it. GitHub supports several access-control options for private repositories.
+
+### Option 1 — GitHub Collaborators (personal repositories)
+
+Invite teammates directly from the repository settings:
+
+1. Go to **Settings → Collaborators** on GitHub
+2. Click **Add people** and enter each teammate's GitHub username or email
+3. Each teammate accepts the invitation and can then clone the private repository:
+
+```bash
+# HTTPS (no SSH setup required)
+git clone https://github.com/<your-username>/sherlock.git sherlock
+
+# SSH (requires SSH key configured on the teammate's GitHub account)
+git clone git@github.com:<your-username>/sherlock.git sherlock
+```
+
+### Option 2 — GitHub Teams (organization repositories)
+
+If the repository is owned by a GitHub organization:
+
+1. Go to **Settings → Collaborators and teams**
+2. Add an existing team (or create one) with at least **Read** access
+3. All members of that team can clone and install Sherlock without the repository being public
+
+### Option 3 — Install from a private repository using a PAT
+
+Teammates can install Sherlock without cloning the repo by using a [GitHub Personal Access Token (PAT)](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with `repo` scope:
+
+```bash
+# Set the token as an environment variable to avoid storing it in shell history
+export GITHUB_PAT=<PAT>
+pip install "git+https://${GITHUB_PAT}@github.com/<your-username>/sherlock.git"
+```
+
+Replace `<PAT>` with the token and `<your-username>` with the repository owner.
+
+### Option 4 — Distribute a pre-built wheel
+
+Build a wheel and share it directly (e.g., via Slack, email, or an internal artifact store):
+
+```bash
+# Build the wheel (run once by the maintainer)
+pip install build
+python -m build --wheel
+
+# Share the generated file, e.g.:
+#   dist/sherlock-1.0.0-py3-none-any.whl
+
+# Teammates install it with (run from the directory containing the .whl file):
+pip install sherlock-1.0.0-py3-none-any.whl
+```
+
+> **Tip**: use Option 1 or Option 2 if you want teammates to receive future updates automatically via `git pull`. Use Option 3 or Option 4 if you prefer zero-friction installation without requiring GitHub access.
 
 ---
 
