@@ -11,6 +11,7 @@ import time
 
 from client.newrelic import get_client
 from core.context import AccountContext
+from core.deeplinks import get_builder as _get_deeplink_builder
 from core.sanitize import sanitize_nrql_string
 
 logger = logging.getLogger("sherlock.tools.nrql")
@@ -85,11 +86,21 @@ async def run_nrql_query(nrql: str) -> str:
         duration_ms = int((time.time() - start) * 1000)
         logger.info("NRQL executed in %dms, %d results", duration_ms, len(nrql_results))
 
+        # Generate deep link to open this query in New Relic Query Builder.
+        deep_link = None
+        try:
+            builder = _get_deeplink_builder()
+            if builder:
+                deep_link = builder.nrql_chart(nrql, since_minutes=60)
+        except Exception:
+            pass
+
         return json.dumps({
             "nrql": nrql,
             "account_id": credentials.account_id,
             "result_count": len(nrql_results),
             "results": nrql_results,
+            "open_in_new_relic": deep_link,
             "warnings": warnings,
             "duration_ms": duration_ms,
         })
