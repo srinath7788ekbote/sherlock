@@ -24,6 +24,7 @@ from core.credentials import Credentials
 from core.deeplinks import get_builder as _get_deeplink_builder
 from core.dependency_graph import (
     DependencyGraph,
+    DependencyNode,
     get_dependencies,
     get_dependents,
     load_graph,
