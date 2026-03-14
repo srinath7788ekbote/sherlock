@@ -24,6 +24,7 @@ from core.credentials import Credentials
 from core.deeplinks import get_builder as _get_deeplink_builder
 from core.dependency_graph import (
     DependencyGraph,
+    DependencyNode,
     get_dependencies,
     get_dependents,
     load_graph,
@@ -956,13 +957,43 @@ def _inject_finding_deep_links(
                             link = builder.k8s_workload(ns, bare_service)
                     elif "k8s_events" in signal:
                         link = builder.k8s_explorer(ns or None)
+                    elif any(k in signal for k in (
+                        "node_pressure", "node_capacity", "disk_pressure",
+                        "statefulset_health", "daemonset_health",
+                        "job_completion", "replicaset_health",
+                    )):
+                        link = builder.k8s_explorer(ns or None)
+
+                elif source == "INFRA":
+                    # Infrastructure findings — build an NRQL chart link
+                    # from the finding's associated query NRQL if available.
+                    nrql = finding.get("_nrql")
+                    if nrql:
+                        link = builder.nrql_chart(nrql, since)
+
+                elif source == "BROWSER":
+                    nrql = finding.get("_nrql")
+                    if nrql:
+                        link = builder.nrql_chart(nrql, since)
+
+                elif source == "MESSAGING":
+                    nrql = finding.get("_nrql")
+                    if nrql:
+                        link = builder.nrql_chart(nrql, since)
+
+                elif source == "DEPENDENCIES":
+                    # Dependency health — link to the dependent service entity
+                    dep_service = finding.get("_dep_service")
+                    if dep_service:
+                        dep_guid = intelligence.apm.service_guids.get(dep_service)
+                        if dep_guid:
+                            link = builder.entity_link(dep_guid)
 
                 elif source == "LOGS":
                     if signal == "error_logs":
-                        if "DEPENDENCY FAILURE" in text or "APPLICATION CRASH" in text:
-                            link = builder.log_search(
-                                service, svc_attr, "ERROR", since
-                            )
+                        link = builder.log_search(
+                            service, svc_attr, "ERROR", since
+                        )
 
                 elif source == "SYNTHETICS":
                     link = None  # synthetic links handled in synthetics.py
@@ -972,6 +1003,10 @@ def _inject_finding_deep_links(
 
                 if link:
                     finding["deep_link"] = link
+
+                # Clean up internal keys before output.
+                finding.pop("_nrql", None)
+                finding.pop("_dep_service", None)
             except Exception:
                 continue
     except Exception:
@@ -1050,6 +1085,38 @@ def _inject_recommendation_links(
                         links["crash_logs"] = builder.log_search(service, svc_attr, "ERROR", since)
                         links["pod_view"] = builder.k8s_workload(ns, bare_service) if ns else None
 
+                    if any(k in area for k in ("reliability", "recurring")):
+                        links["alert_history"] = (
+                            f"{builder._base}/alerts-ai/incidents"
+                            f"?account={builder._account_id}"
+                        )
+                        links["error_chart"] = builder.spike_chart(
+                            f"SELECT percentage(count(*), WHERE error IS true) "
+                            f"FROM Transaction WHERE appName='{service}' "
+                            f"TIMESERIES 5 minutes SINCE {since} minutes ago",
+                            since,
+                        )
+
+                    if any(k in area for k in ("application", "throughput")):
+                        links["throughput_chart"] = builder.nrql_chart(
+                            f"SELECT rate(count(*), 1 minute) FROM Transaction "
+                            f"WHERE appName='{service}' TIMESERIES "
+                            f"SINCE {since} minutes ago",
+                            since,
+                        )
+                        if entity_guid:
+                            links["service"] = builder.entity_link(entity_guid)
+
+                    if any(k in area for k in ("infrastructure", "infra", "disk", "cpu", "memory")):
+                        ns = effective_ns or ""
+                        links["k8s_explorer"] = builder.k8s_explorer(ns or None)
+                        links["infra_chart"] = builder.nrql_chart(
+                            f"SELECT average(cpuPercent), average(memoryUsedPercent) "
+                            f"FROM SystemSample TIMESERIES "
+                            f"SINCE {since} minutes ago",
+                            since,
+                        )
+
                 elif priority == "P2":
                     if any(k in area for k in ("database", "latency")):
                         links["transactions"] = builder.apm_transactions(entity_guid) if entity_guid else None
@@ -1060,6 +1127,24 @@ def _inject_recommendation_links(
                             f"SINCE {since} minutes ago"
                         )
                         links["slow_queries"] = builder.nrql_chart(sq_nrql, since)
+
+                    if any(k in area for k in ("messaging", "queue")):
+                        links["queue_chart"] = builder.nrql_chart(
+                            f"SELECT average(queue.size) FROM QueueSample "
+                            f"FACET queue.name TIMESERIES "
+                            f"SINCE {since} minutes ago",
+                            since,
+                        )
+
+                    if any(k in area for k in ("performance", "response_time")):
+                        links["response_time"] = builder.nrql_chart(
+                            f"SELECT average(duration), percentile(duration, 95) "
+                            f"FROM Transaction WHERE appName='{service}' "
+                            f"TIMESERIES SINCE {since} minutes ago",
+                            since,
+                        )
+                        if entity_guid:
+                            links["transactions"] = builder.apm_transactions(entity_guid)
 
                 # Only attach if any link was produced.
                 if any(v is not None for v in links.values()):
@@ -1255,9 +1340,20 @@ async def investigate_service(
                     "signal": query.signal,
                     "severity": _severity_emoji(signal),
                     "finding": signal,
+                    "_nrql": query.nrql,
                 })
 
         # ── DEEP LINKS ─────────────────────────────────────────
+        # Attach per-query NRQL chart links to raw_data so every
+        # piece of evidence carries a clickable source URL.
+        _builder = _get_deeplink_builder()
+        if _builder is not None:
+            raw_data_links: dict[str, str | None] = {}
+            for query in queries:
+                raw_data_links[query.signal] = _builder.nrql_chart(
+                    query.nrql, anchor.since_minutes
+                )
+            raw_data["_open_in_new_relic"] = raw_data_links
 
         # ── DEPENDENCY HEALTH CHECK ───────────────────────────
 
@@ -1287,6 +1383,7 @@ async def investigate_service(
                     "signal": "dependency_health",
                     "severity": "WARNING",
                     "finding": finding_text,
+                    "_dep_service": unhealthy["service"],
                 })
 
         # ── DEEP LINK INJECTION ────────────────────────────────
