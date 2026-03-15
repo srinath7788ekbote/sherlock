@@ -20,20 +20,21 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 4. [Installation](#installation)
 5. [Sharing with Teammates (Private Repository)](#sharing-with-teammates-private-repository)
 6. [Configuration](#configuration)
-7. [Available Tools (20)](#available-tools-20)
+7. [Available Tools (21)](#available-tools-21)
 8. [Workflows](#workflows)
 9. [Security Model](#security-model)
 10. [Multi-Tenant Profiles](#multi-tenant-profiles)
 11. [Synthetics Deep-Dive](#synthetics-deep-dive)
-12. [Developer Guide](#developer-guide)
-13. [Troubleshooting](#troubleshooting)
-14. [License](#license)
+12. [Service Dependencies](#service-dependencies)
+13. [Developer Guide](#developer-guide)
+14. [Troubleshooting](#troubleshooting)
+15. [License](#license)
 
 ---
 
 ## Overview
 
-This MCP server exposes **20 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps) so every subsequent query is precise and context-aware.
+This MCP server exposes **21 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
 
 ### Key Capabilities
 
@@ -43,6 +44,10 @@ This MCP server exposes **20 tools** that let an AI assistant query your New Rel
 - **Prompt-injection scrubbing** — all tool output is scanned before returning to the LLM
 - **Parallel data fetching** — investigation tools fire queries concurrently for speed
 - **Credential security** — API keys stored in OS keychain via `keyring`, never in plain text
+- **Deep links** — every finding includes a clickable URL to the exact New Relic UI view
+- **Adaptive data discovery** — the investigation engine queries only event types that have data
+- **Service dependency mapping** — automatic dependency graph built from spans, logs, and naming patterns
+- **Three-phase investigation** — anchor the incident, discover available data, then adaptively investigate
 
 ---
 
@@ -64,13 +69,15 @@ This MCP server exposes **20 tools** that let an AI assistant query your New Rel
 │  │                   tools/ layer                       ││
 │  │  entities │ nrql │ alerts │ apm │ logs │ k8s        ││
 │  │  golden_signals │ synthetics │ investigate           ││
-│  │  intelligence_tools                                  ││
+│  │  intelligence_tools │ dependencies                   ││
 │  └──────┬──────────────────────────────────────────────┘│
 │         │                                                │
 │  ┌──────▼──────────────────────────────────────────────┐│
 │  │                  core/ layer                         ││
 │  │  context │ credentials │ intelligence │ cache        ││
-│  │  sanitize │ exceptions                               ││
+│  │  sanitize │ exceptions │ deeplinks                   ││
+│  │  discovery │ query_builder                           ││
+│  │  dependency_graph │ graph_builder                    ││
 │  └──────┬──────────────────────────────────────────────┘│
 │         │                                                │
 │  ┌──────▼──────────────────────────────────────────────┐│
@@ -91,7 +98,7 @@ This MCP server exposes **20 tools** that let an AI assistant query your New Rel
 |-------|---------|
 | **main.py** | MCP server lifecycle, tool registration, audit logging, response scrubbing |
 | **tools/** | Individual tool implementations — each file owns one domain |
-| **core/** | Shared primitives — credentials, context, intelligence, cache, sanitization |
+| **core/** | Shared primitives — credentials, context, intelligence, cache, sanitization, deep links, data discovery, query building, dependency graph |
 | **client/** | HTTP transport — NerdGraph client with retry, read-only enforcement, batching |
 
 ---
@@ -267,23 +274,23 @@ python scripts/cli.py
 
 ---
 
-## Available Tools (20)
+## Available Tools (21)
 
-### Connection & Intelligence (4 tools)
+### Connection & Intelligence (5 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
 | 1 | `connect_account` | Connect to a New Relic account by profile name or credentials |
-| 2 | `learn_account` | Re-discover account topology (APM, K8s, synthetics, alerts, etc.) |
-| 3 | `get_account_summary` | Return a summary of discovered assets |
-| 4 | `list_profiles` | List all saved credential profiles |
+| 2 | `list_profiles` | List all saved credential profiles |
+| 3 | `learn_account` | Re-discover account topology (APM, OTel, K8s, synthetics, alerts, etc.) |
+| 4 | `get_account_summary` | Return a summary of discovered assets (APM, OTel, infra, browser, mobile, workloads) |
+| 5 | `get_nrql_context` | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.) |
 
-### Query & Exploration (3 tools)
+### Query & Exploration (2 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 5 | `run_nrql_query` | Execute any read-only NRQL query |
-| 6 | `get_nrql_context` | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.) |
+| 6 | `run_nrql_query` | Execute any read-only NRQL query (includes deep link to Query Builder) |
 | 7 | `get_entity_guid` | Look up an entity's GUID by name or domain |
 
 ### APM & Performance (3 tools)
@@ -299,14 +306,14 @@ python scripts/cli.py
 | # | Tool | Description |
 |---|------|-------------|
 | 11 | `get_alerts` | List alert policies and their conditions |
-| 12 | `get_incidents` | List incidents filtered by state (open/closed) |
+| 12 | `get_incidents` | List incidents filtered by state (open/closed), includes deep links |
 | 13 | `get_service_incidents` | Get incidents for a specific service (fuzzy name resolution) |
 
 ### Infrastructure & Kubernetes (1 tool)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 14 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events |
+| 14 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events (with deep links) |
 
 ### Logs (1 tool)
 
@@ -333,9 +340,13 @@ python scripts/cli.py
 
 | # | Tool | Description |
 |---|------|-------------|
-| — | `investigate_service` | **Mega-tool**: parallel fetch of golden signals, alerts, logs, K8s, synthetics → unified report |
+| 21 | `investigate_service` | **Three-phase adaptive investigation**: anchors the incident, discovers available data, then queries only discovered event types across APM, logs, K8s, synthetics, alerts, and dependencies — returns findings with deep links and fix recommendations |
 
-> Note: `investigate_service` uses the tools above internally and is registered as tool #20 in the server.
+### Service Dependencies (1 tool — included in the 21 above)
+
+| # | Tool | Description |
+|---|------|-------------|
+| — | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
 
 ---
 
@@ -354,8 +365,26 @@ User: "How is web-api performing?"
 ```
 User: "Investigate the checkout service — it seems slow"
 → Copilot calls: investigate_service("checkout-service")
-→ Parallel fetch: golden signals + alerts + logs + K8s + synthetics
-→ Returns: unified report with root cause hypothesis and recommendations
+→ Phase 1: Anchors the incident (finds active alerts, determines time window)
+→ Phase 2: Discovers available data (checks which event types have data)
+→ Phase 3: Queries only discovered data in parallel across APM, logs, K8s, synthetics, alerts, dependencies
+→ Returns: unified report with findings, deep links, root cause hypothesis, and prioritized recommendations
+```
+
+### Service Dependency Mapping
+
+```
+User: "What does the payment service depend on?"
+→ Copilot calls: get_service_dependencies("payment-service")
+→ Returns: upstream callers, downstream callees, call counts, error rates, latency, health warnings
+```
+
+### Dependency Chain Investigation
+
+```
+User: "Show me what calls the auth service and what it calls"
+→ Copilot calls: get_service_dependencies("auth-service", direction="both", max_depth=3)
+→ Returns: full upstream/downstream dependency tree with transitive dependencies
 ```
 
 ### Synthetic Monitor Triage
@@ -469,6 +498,8 @@ python scripts/cli.py
 ├── profiles.json          # Profile metadata (no secrets)
 ├── cache/
 │   └── {account_id}.json  # Intelligence cache per account
+├── graphs/
+│   └── {account_id}.json  # Dependency graph per account
 └── logs/
     ├── sherlock.log       # Application logs (10MB × 5 rotations)
     └── audit.log          # Audit trail (10MB × 10 rotations)
@@ -543,6 +574,40 @@ Monitor names are resolved with a **0.5 threshold** using token overlap matching
 
 ---
 
+## Service Dependencies
+
+### Dependency Graph
+
+Sherlock automatically builds a service dependency graph during `connect_account`. The graph uses three discovery strategies, merged in priority order:
+
+| Strategy | Confidence | Source |
+|----------|------------|--------|
+| **Span-Based** | 1.0 (highest) | `Span` event data — `peer.service.name`, `http.url` |
+| **Log-Based** | 0.7 | Log error messages containing service references |
+| **Inferred** | 0.4 (lowest) | Shared naming segments between services |
+
+Higher-confidence edges override lower ones when the same dependency is detected by multiple strategies.
+
+### Graph Persistence
+
+The dependency graph is saved to `~/.sherlock/graphs/{account_id}.json` and reloaded on subsequent connections. The graph has a **24-hour staleness TTL** — stale graphs are still usable but flagged as stale in responses.
+
+### Using the Dependencies Tool
+
+```
+User: "What services does checkout depend on?"
+→ Copilot calls: get_service_dependencies("checkout", direction="downstream")
+→ Returns: list of downstream services with call counts, error rates, latency, confidence
+
+User: "What is calling the auth service?"
+→ Copilot calls: get_service_dependencies("auth-service", direction="upstream")
+→ Returns: list of upstream callers with health warnings for unhealthy dependencies
+```
+
+The `investigate_service` tool also automatically includes dependency analysis in its findings.
+
+---
+
 ## Developer Guide
 
 ### Project Structure
@@ -553,7 +618,7 @@ sherlock/
 ├── Makefile                    # Development commands
 ├── .env.example                # Environment variable template
 ├── .gitignore
-├── main.py                     # MCP server entry point (20 tools)
+├── main.py                     # MCP server entry point (21 tools)
 ├── core/
 │   ├── __init__.py
 │   ├── exceptions.py           # Custom exceptions
@@ -561,7 +626,12 @@ sherlock/
 │   ├── credentials.py          # Credential management (keyring)
 │   ├── cache.py                # Two-layer caching (memory + disk)
 │   ├── context.py              # Thread-safe singleton context
-│   └── intelligence.py         # Account discovery models + learn_account()
+│   ├── intelligence.py         # Account discovery models + learn_account()
+│   ├── discovery.py            # Data discovery engine (checks what event types exist)
+│   ├── query_builder.py        # Dynamic NRQL query generation for investigation
+│   ├── deeplinks.py            # New Relic deep link URL builder
+│   ├── dependency_graph.py     # Dependency graph data model and persistence
+│   └── graph_builder.py        # 3-strategy dependency graph builder (spans, logs, naming)
 ├── client/
 │   ├── __init__.py
 │   └── newrelic.py             # NerdGraph HTTP client (read-only, retry, batch)
@@ -575,22 +645,35 @@ sherlock/
 │   ├── k8s.py                  # Kubernetes health
 │   ├── golden_signals.py       # Golden signals (latency, errors, traffic, saturation)
 │   ├── synthetics.py           # Synthetic monitoring (status, results, investigation)
-│   ├── investigate.py          # Multi-source service investigation
-│   └── intelligence_tools.py   # Connection, learning, profiles
+│   ├── investigate.py          # Three-phase adaptive service investigation
+│   ├── intelligence_tools.py   # Connection, learning, profiles
+│   └── dependencies.py         # Service dependency mapping
 ├── scripts/
 │   ├── test_connection.py      # Interactive connection validator
-│   └── cli.py                  # Interactive CLI for all 20 tools
+│   └── cli.py                  # Interactive CLI for all 21 tools
 ├── tests/
-│   ├── conftest.py             # Shared fixtures (mock_credentials, mock_intelligence, etc.)
+│   ├── conftest.py             # Shared fixtures
+│   ├── test_alerts.py
+│   ├── test_apm.py
+│   ├── test_bug_fixes.py
+│   ├── test_context.py
 │   ├── test_credentials.py
+│   ├── test_deeplinks.py
+│   ├── test_dependencies_tool.py
+│   ├── test_dependency_graph.py
+│   ├── test_discovery.py
+│   ├── test_entities.py
+│   ├── test_golden_signals.py
+│   ├── test_graph_builder.py
 │   ├── test_intelligence.py
-│   ├── test_sanitize.py
-│   ├── test_nrql.py
-│   ├── test_synthetics.py      # 12 required test cases
+│   ├── test_intelligence_tools.py
 │   ├── test_investigate.py
 │   ├── test_k8s.py
 │   ├── test_logs.py
-│   └── test_context.py
+│   ├── test_nrql.py
+│   ├── test_query_builder.py
+│   ├── test_sanitize.py
+│   └── test_synthetics.py
 ├── profiles/
 │   └── profiles.example.json
 └── .vscode/
@@ -603,14 +686,26 @@ sherlock/
 # All tests
 make test
 
-# Fast tests (skip slow integration tests)
+# Fast tests (stop on first failure)
 make test-fast
 
 # Synthetics tests only
 make test-synthetics
 
-# With coverage
-pytest --cov=. --cov-report=html tests/
+# Investigation tests only
+make test-investigate
+
+# Dependency graph tests only
+make test-dependencies
+
+# Discovery engine tests only
+make test-discovery
+
+# Deep links tests only
+make test-deeplinks
+
+# With coverage report
+make test-cov
 ```
 
 ### Linting & Formatting

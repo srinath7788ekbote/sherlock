@@ -1,4 +1,4 @@
-.PHONY: install run test test-fast test-synthetics lint format logs audit connect cli clean
+.PHONY: install run test test-fast test-synthetics test-investigate test-dependencies test-discovery test-deeplinks test-cov lint format logs audit connect cli clean
 
 install:
 	pip install -e ".[dev]"
@@ -14,6 +14,21 @@ test-fast:
 
 test-synthetics:
 	pytest tests/test_synthetics.py -v
+
+test-investigate:
+	pytest tests/test_investigate.py tests/test_discovery.py tests/test_query_builder.py -v
+
+test-dependencies:
+	pytest tests/test_dependencies_tool.py tests/test_dependency_graph.py tests/test_graph_builder.py -v
+
+test-discovery:
+	pytest tests/test_discovery.py -v
+
+test-deeplinks:
+	pytest tests/test_deeplinks.py -v
+
+test-cov:
+	pytest tests/ -v --cov=. --cov-report=html --cov-report=term
 
 lint:
 	ruff check . && mypy .
