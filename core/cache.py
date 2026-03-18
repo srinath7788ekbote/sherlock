@@ -18,7 +18,7 @@ logger = logging.getLogger("sherlock.cache")
 DEFAULT_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "1800"))
 
 # Disk cache directory.
-CACHE_DIR = Path.home() / ".sherlock" / "cache"
+CACHE_DIR = Path(__file__).resolve().parent.parent / ".sherlock" / "cache"
 
 
 class IntelligenceCache:

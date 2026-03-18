@@ -32,8 +32,8 @@ profiles/profiles.json
 cache/
 *.log
 
-# Logs directory (user home)
-logs/
+# Sherlock local data directory
+.sherlock/
 
 # Keyring
 *.keyring

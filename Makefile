@@ -37,10 +37,10 @@ format:
 	ruff format .
 
 logs:
-	tail -f ~/.sherlock/logs/sherlock.log | python -m json.tool
+	tail -f .sherlock/logs/sherlock.log | python -m json.tool
 
 audit:
-	tail -f ~/.sherlock/logs/audit.log | python -m json.tool
+	tail -f .sherlock/logs/audit.log | python -m json.tool
 
 connect:
 	python scripts/test_connection.py

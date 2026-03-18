@@ -24,7 +24,7 @@ logger = logging.getLogger("sherlock.credentials")
 KEYRING_SERVICE = "sherlock"
 
 # Base directory for all NewRelic MCP configuration.
-CONFIG_DIR = Path.home() / ".sherlock"
+CONFIG_DIR = Path(__file__).resolve().parent.parent / ".sherlock"
 
 # Path to the profiles metadata file.
 PROFILES_FILE = CONFIG_DIR / "profiles.json"

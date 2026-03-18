@@ -148,27 +148,141 @@ make run
 
 ### Windows
 
-```powershell
-# 1. Ensure Python 3.11+ is installed
-python --version
+#### Quick Setup (automated)
 
-# 2. Clone and navigate
+1. Clone the repository:
+
+```powershell
 cd $env:USERPROFILE\Documents
 git clone <repo-url> sherlock
 cd sherlock
+```
 
-# 3. Create virtual environment
+2. Right-click **`setup.bat`** and select **Run as administrator**.
+
+The script automatically installs Chocolatey, Make, Python (latest), creates the virtual environment, and installs all dependencies. It skips anything already installed.
+
+3. Open a **new terminal** (regular, not admin), then:
+
+```powershell
+cd $env:USERPROFILE\Documents\sherlock
+.venv\Scripts\activate.bat
+make connect
+```
+
+This will prompt you for:
+- **Account ID** — your New Relic account ID (numeric)
+- **API Key** — a User API key in `NRAK-...` format ([create one here](https://one.newrelic.com/api-keys))
+- **Region** — `US` or `EU`
+
+Credentials are saved securely in Windows Credential Locker.
+
+4. Configure MCP in your AI client (see [MCP Configuration](#mcp-configuration) below).
+
+#### Manual Setup (step-by-step)
+
+If you prefer to run each step yourself, or if the batch file fails:
+
+<details>
+<summary>Click to expand manual steps</summary>
+
+**Install Chocolatey** — open PowerShell as Administrator:
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+```
+
+**Install Make and Python** — close and reopen PowerShell, then:
+
+```powershell
+choco install make -y
+choco install python -y
+```
+
+**Clone, create venv, install** — close and reopen PowerShell:
+
+```powershell
+cd $env:USERPROFILE\Documents
+git clone <repo-url> sherlock
+cd sherlock
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+make install
+```
 
-# 4. Install
-pip install -e ".[dev]"
+> **Note:** If you get an execution-policy error on `Activate.ps1`, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` first.
 
-# 5. Verify connection
-python scripts/test_connection.py
+**Connect and save profile:**
 
-# 6. Run
-python -m main
+```powershell
+make connect
+```
+
+</details>
+
+#### MCP Configuration
+
+After setup, add the Sherlock MCP server to your AI client's configuration.
+
+**VS Code / GitHub Copilot** — add to your `settings.json` (or use the pre-configured `.vscode/settings.json` in this repo):
+
+```json
+{
+  "github.copilot.chat.mcpServers": {
+    "sherlock": {
+      "command": "python",
+      "args": ["main.py"],
+      "cwd": "C:\\Users\\<your-username>\\Documents\\sherlock"
+    }
+  }
+}
+```
+
+**Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "sherlock": {
+      "command": "C:\\Users\\<your-username>\\Documents\\sherlock\\.venv\\Scripts\\python.exe",
+      "args": ["main.py"],
+      "cwd": "C:\\Users\\<your-username>\\Documents\\sherlock"
+    }
+  }
+}
+```
+
+**Cursor** — add to `.cursor/mcp.json` in your project root (or global config):
+
+```json
+{
+  "mcpServers": {
+    "sherlock": {
+      "command": "C:\\Users\\<your-username>\\Documents\\sherlock\\.venv\\Scripts\\python.exe",
+      "args": ["main.py"],
+      "cwd": "C:\\Users\\<your-username>\\Documents\\sherlock"
+    }
+  }
+}
+```
+
+> **Important:** Replace `<your-username>` with your actual Windows username. Use the full path to the `.venv` Python executable so the MCP client uses the correct virtual environment.
+
+#### Verify everything works
+
+```powershell
+# Run the MCP server directly to test
+make run
+# or: python main.py
+```
+
+Then open your AI client and try:
+
+```
+@sherlock list all profiles
+@sherlock how is my-service performing?
 ```
 
 ### VS Code Integration

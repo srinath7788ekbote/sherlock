@@ -32,7 +32,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # ── Directory setup ──────────────────────────────────────────────────────
 
-CONFIG_DIR = Path.home() / ".sherlock"
+CONFIG_DIR = Path(__file__).resolve().parent / ".sherlock"
 LOG_DIR = CONFIG_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 

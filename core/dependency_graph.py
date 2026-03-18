@@ -22,7 +22,7 @@ logger = logging.getLogger("sherlock.dependency_graph")
 
 # ── Disk Storage Constants ───────────────────────────────────────────────
 
-DEPS_DIR = Path.home() / ".sherlock" / "deps"
+DEPS_DIR = Path(__file__).resolve().parent.parent / ".sherlock" / "deps"
 DEPS_FILE_PATTERN = "{account_id}.json"
 
 # Default TTL: 24 hours (graph structure changes slowly).
