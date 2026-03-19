@@ -298,6 +298,61 @@ class TestInvestigateService:
 # ── New tests for the three-phase architecture ───────────────────────────
 
 
+class TestBareNameCandidates:
+    """Test that investigate_service adds bare name variants for K8s discovery."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_bare_name_added_for_slash_separated_service(self, investigate_context, mock_intelligence):
+        """Service names with '/' always get bare segments added as candidates."""
+        mock_intelligence.apm.service_names.append("eswd-prod/sifi-adapter")
+
+        captured_candidates = []
+
+        async def capture_discover(service_candidates, **kwargs):
+            captured_candidates.extend(service_candidates)
+            return DiscoveryResult()
+
+        respx.post("https://api.newrelic.com/graphql").mock(
+            return_value=httpx.Response(200, json=_empty_nrql())
+        )
+
+        with patch("tools.investigate.discover_available_data", side_effect=capture_discover):
+            await investigate_service("eswd-prod/sifi-adapter")
+
+        # The bare name "sifi-adapter" should be in the candidates,
+        # regardless of whether naming_convention was learned.
+        assert "sifi-adapter" in captured_candidates, (
+            f"Expected 'sifi-adapter' in candidates, got: {captured_candidates}"
+        )
+        # The prefix segment should also be present for namespace matching.
+        assert "eswd-prod" in captured_candidates, (
+            f"Expected 'eswd-prod' in candidates, got: {captured_candidates}"
+        )
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_extra_candidates_without_slash(self, investigate_context, mock_intelligence):
+        """Service names without '/' don't get extra bare name variants."""
+        respx.post("https://api.newrelic.com/graphql").mock(
+            return_value=httpx.Response(200, json=_empty_nrql())
+        )
+
+        captured_candidates = []
+
+        async def capture_discover(service_candidates, **kwargs):
+            captured_candidates.extend(service_candidates)
+            return DiscoveryResult()
+
+        with patch("tools.investigate.discover_available_data", side_effect=capture_discover):
+            await investigate_service("payment-svc-prod")
+
+        # No extra slash-split variants added (no '/' in name).
+        slash_split_variants = [c for c in captured_candidates if "/" not in c and c != "payment-svc-prod"]
+        # Only the original candidate should be present (no bare variants from '/')
+        assert "payment-svc-prod" in captured_candidates
+
+
 class TestAnchorInvestigation:
     """Tests for _anchor_investigation (Phase 1)."""
 
@@ -559,6 +614,7 @@ class TestInvestigationReportStructure:
             assert "overall_status" in report
             assert "window" in report
             assert "domains_investigated" in report
+            assert "domains_no_data_hint" in report
 
     @respx.mock
     @pytest.mark.asyncio

@@ -1262,6 +1262,31 @@ async def investigate_service(
                 deduped.append(c)
         all_candidates = deduped
 
+        # Add bare name variants for K8s discovery.
+        # K8s entities use bare deployment names (e.g. "sifi-adapter")
+        # while APM uses environment-prefixed names (e.g.
+        # "eswd-prod/sifi-adapter").  Without the bare name in the
+        # candidate list, K8s discovery's LIKE '%candidate%' won't
+        # match the shorter K8s deployment name.
+        #
+        # Strategy: always split on '/' (universal namespace separator),
+        # then also try the learned naming convention separator if
+        # different.  This works even when naming_convention hasn't
+        # been learned for the account.
+        _separators = {"/"}
+        nc = intelligence.naming_convention
+        if nc and getattr(nc, "separator", None):
+            _separators.add(nc.separator)
+        for sep in _separators:
+            for cand in list(all_candidates):
+                if sep in cand:
+                    parts = cand.split(sep)
+                    for part in parts:
+                        part = part.strip()
+                        if part and part.lower() not in seen:
+                            seen.add(part.lower())
+                            all_candidates.append(part)
+
         # Fallback: if nothing resolved, try the original name.
         if not all_candidates:
             safe_name = sanitize_service_name(service_name)
@@ -1289,6 +1314,20 @@ async def investigate_service(
             credentials=credentials,
             intelligence=intelligence,
         )
+
+        # After discovery, the resolution cache may now contain the
+        # *actual* APM entity name (e.g. the real appName may differ
+        # from the fuzzy-resolved candidate).  Update the anchor so
+        # all subsequent queries use the confirmed name.
+        cached = ctx.get_cached_resolution(service_name)
+        if cached and cached != anchor.primary_service:
+            logger.info(
+                "Updating anchor primary_service: '%s' → '%s'",
+                anchor.primary_service, cached,
+            )
+            anchor.primary_service = cached
+            if cached not in anchor.all_candidates:
+                anchor.all_candidates.insert(0, cached)
 
         # ── PHASE 3: ADAPTIVE INVESTIGATION ────────────────────
 
@@ -1475,6 +1514,12 @@ async def investigate_service(
                         ]
                         if d not in discovery.domains_with_data
                     ],
+                    "domains_no_data_hint": (
+                        "If key domains like k8s or logs appear in "
+                        "domains_no_data, use individual tools "
+                        "(get_k8s_health, search_logs) with the full "
+                        "time window as a follow-up to confirm."
+                    ),
                     "discovery_duration_ms": discovery.discovery_duration_ms,
                     "active_incident": anchor.active_incident,
                 },

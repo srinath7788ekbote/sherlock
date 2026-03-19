@@ -17,6 +17,11 @@ from core.sanitize import fuzzy_resolve_service, sanitize_nrql_string, sanitize_
 
 logger = logging.getLogger("sherlock.tools.logs")
 
+# Fallback service attributes to try when the primary returns no results.
+_SERVICE_ATTR_FALLBACKS = [
+    "entity.name", "service.name", "serviceName", "appName", "app.name",
+]
+
 # NerdGraph NRQL query template.
 GQL_NRQL_QUERY = """
 {
@@ -93,7 +98,10 @@ async def search_logs(
                 )
             except Exception:
                 resolved_name = safe_name
-            nrql += NRQL_LOG_SERVICE_FILTER % (svc_attr, resolved_name)
+            # Use LIKE matching for resilience — the log service.name may
+            # not exactly equal the APM appName (e.g. different namespace
+            # segments).  LIKE '%name%' covers both exact and partial matches.
+            nrql += " AND `%s` LIKE '%%%s%%'" % (svc_attr, resolved_name)
 
         if severity:
             safe_severity = sanitize_nrql_string(severity)
@@ -120,6 +128,45 @@ async def search_logs(
             .get("results", [])
         )
 
+        # If the primary service attribute returned no results, try fallbacks.
+        used_fallback_attr = None
+        if not logs and resolved_name:
+            for alt_attr in _SERVICE_ATTR_FALLBACKS:
+                if alt_attr == svc_attr:
+                    continue
+                alt_nrql = NRQL_LOG_BASE % (alt_attr, sev_attr)
+                alt_nrql += " AND `%s` LIKE '%%%s%%'" % (alt_attr, resolved_name)
+                if severity:
+                    safe_severity = sanitize_nrql_string(severity)
+                    levels = [f"'{s.strip()}'" for s in safe_severity.split(",")]
+                    alt_nrql += NRQL_LOG_SEVERITY_FILTER % (sev_attr, ", ".join(levels))
+                if keyword:
+                    safe_keyword = sanitize_nrql_string(keyword)
+                    alt_nrql += NRQL_LOG_KEYWORD_FILTER % safe_keyword
+                alt_nrql += NRQL_LOG_SINCE % since_minutes
+                alt_nrql += NRQL_LOG_ORDER
+                alt_nrql += NRQL_LOG_LIMIT % min(limit, 500)
+
+                escaped_alt = alt_nrql.replace('"', '\\"')
+                alt_query = GQL_NRQL_QUERY % (credentials.account_id, escaped_alt)
+                try:
+                    alt_result = await client.query(alt_query)
+                    alt_logs = (
+                        alt_result.get("data", {})
+                        .get("actor", {})
+                        .get("account", {})
+                        .get("nrql", {})
+                        .get("results", [])
+                    )
+                    if alt_logs:
+                        logs = alt_logs
+                        nrql = alt_nrql
+                        svc_attr = alt_attr
+                        used_fallback_attr = alt_attr
+                        break
+                except Exception:
+                    continue
+
         duration_ms = int((time.time() - start) * 1000)
         response: dict = {
             "account_id": credentials.account_id,
@@ -135,6 +182,11 @@ async def search_logs(
         if was_fuzzy and resolved_name:
             response["resolved_from"] = service_name
             response["note"] = f"Fuzzy matched '{service_name}' → '{resolved_name}'"
+        if used_fallback_attr:
+            response["note"] = response.get("note", "") + (
+                f" Logs found via '{used_fallback_attr}' attribute"
+                f" (primary '{intelligence.logs.service_attribute}' had no results)."
+            )
 
         # Deep links — only when errors were found.
         if len(logs) > 0 and resolved_name:

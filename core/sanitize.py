@@ -370,9 +370,14 @@ def fuzzy_resolve_service(
 ) -> tuple[str, bool, float]:
     """Fuzzy-resolve a user-provided service name against known services.
 
-    Uses SequenceMatcher for scoring. Tries exact match first (case-insensitive),
-    then environment-preserving resolution (when naming_convention is provided),
-    then falls back to fuzzy matching.
+    **Resolution order:**
+      0. Check the AccountContext resolution cache — if a previous tool call
+         already confirmed the real entity name for this input via NRQL
+         discovery, reuse it immediately.
+      1. Exact case-insensitive match.
+      2. Environment-preserving resolution (when naming_convention is provided).
+      3. Substring match.
+      4. Fuzzy SequenceMatcher.
 
     When a naming convention is known and the input contains the account's
     separator (e.g. "/"), the resolver:
@@ -397,6 +402,21 @@ def fuzzy_resolve_service(
         raise ServiceNotFoundError(
             input_name=input_name, closest_matches=[], domain="apm"
         )
+
+    # ── Step 0: check resolution cache ──
+    try:
+        from core.context import AccountContext
+
+        ctx = AccountContext()
+        if ctx.is_connected():
+            cached = ctx.get_cached_resolution(input_name)
+            if cached:
+                logger.info(
+                    "Cache hit: '%s' → '%s'", input_name, cached,
+                )
+                return (cached, cached.lower() != input_name.lower().strip(), 1.0)
+    except Exception:
+        pass  # context not available — continue with normal resolution
 
     # Exact match (case-insensitive).
     lower_input = input_name.lower().strip()
@@ -457,13 +477,21 @@ def fuzzy_resolve_service(
                 if bare_ratio < threshold:
                     continue
 
-                # Env boost: +30% for same environment segment.
-                env_boost = 0.0
-                if input_env and svc_env and input_env.lower() == svc_env.lower():
-                    env_boost = 0.3
+                # Env scoring: boost same env, penalize mismatched env.
+                # When the user explicitly specifies "eswd-prod/..." and a
+                # candidate lives in "eswd-preprod", the mismatch must
+                # outweigh even a perfect bare-name match.
+                env_adjust = 0.0
+                if input_env and svc_env:
+                    if input_env.lower() == svc_env.lower():
+                        env_adjust = 0.3   # same env → boost
+                    else:
+                        env_adjust = -0.4  # different env → penalty
 
                 # Store raw (uncapped) score for sorting.
-                raw_score = bare_ratio + env_boost
+                raw_score = bare_ratio + env_adjust
+                if raw_score < threshold:
+                    continue
                 candidates.append((service, round(raw_score, 3)))
 
             if candidates:

@@ -197,7 +197,8 @@ async def get_service_incidents(service_name: str) -> str:
         was_fuzzy = False
         try:
             resolved_name, was_fuzzy, confidence = fuzzy_resolve_service(
-                safe_name, intelligence.apm.service_names, threshold=0.5
+                safe_name, intelligence.apm.service_names, threshold=0.5,
+                naming_convention=intelligence.naming_convention,
             )
         except Exception:
             resolved_name = safe_name

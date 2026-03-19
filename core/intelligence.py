@@ -336,6 +336,21 @@ NRQL_K8S_PVC_COUNT = (
 )
 
 NRQL_LOG_KEYSET = "SELECT keyset() FROM Log SINCE 1 day ago"
+NRQL_LOG_COUNT = "SELECT count(*) FROM Log SINCE 1 day ago"
+# Probe which service/severity attributes exist in logs (fallback when keyset fails).
+NRQL_LOG_ATTR_PROBE = (
+    "SELECT "
+    + ", ".join(
+        f"uniqueCount(`{attr}`) as `has_{attr.replace('.', '_')}`"
+        for attr in [
+            "service.name", "serviceName", "service", "app.name",
+            "application", "appName", "entity.name",
+            "level", "severity", "log_severity", "log.level",
+            "loglevel", "priority",
+        ]
+    )
+    + " FROM Log SINCE 1 day ago"
+)
 
 NRQL_TOP_ERRORS = (
     "SELECT count(*) FROM TransactionError"
@@ -1292,6 +1307,8 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
             _nrql(NRQL_K8S_CRONJOB_COUNT),                      # 23: K8s cronjob count
             _nrql(NRQL_K8S_PV_COUNT),                           # 24: K8s PV count
             _nrql(NRQL_K8S_PVC_COUNT),                          # 25: K8s PVC count
+            _nrql(NRQL_LOG_COUNT),                              # 26: log count fallback
+            _nrql(NRQL_LOG_ATTR_PROBE),                          # 27: log attribute probe
             return_exceptions=True,
         )
     except Exception as exc:
@@ -1470,6 +1487,11 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
             keyset = results[6][0].get("allKeys", []) if results[6] else []
             if not keyset and results[6]:
                 keyset = results[6][0].get("uniques.key", []) if results[6] else []
+            # Handle key-per-row format: [{"key": "attr1"}, {"key": "attr2"}, ...]
+            if not keyset and results[6] and isinstance(results[6], list):
+                row_keys = [r.get("key") for r in results[6] if isinstance(r, dict) and "key" in r]
+                if row_keys:
+                    keyset = row_keys
             if keyset:
                 intel.logs.enabled = True
                 intel.account_meta.logs_enabled = True
@@ -1481,11 +1503,55 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
                     if candidate in keyset:
                         intel.logs.severity_attribute = candidate
                         break
-            else:
-                # keyset() returned but empty or log exists
-                intel.logs.enabled = len(keyset) > 0
     except Exception:
         pass
+
+    # ── 6b: Log Count Fallback ──
+    # If keyset() failed to detect logs (e.g. partitioned logs), use count(*)
+    # and probe for actual attribute names.
+    if not intel.logs.enabled:
+        try:
+            if not isinstance(results[26], BaseException) and results[26]:
+                log_count = results[26][0].get("count", 0) if results[26] else 0
+                if log_count > 0:
+                    intel.logs.enabled = True
+                    intel.account_meta.logs_enabled = True
+
+                    # Try to determine actual attributes from probe query (index 27).
+                    probe = {}
+                    try:
+                        if not isinstance(results[27], BaseException) and results[27]:
+                            probe = results[27][0] if results[27] else {}
+                    except Exception:
+                        pass
+
+                    # Pick the first service attribute with data.
+                    for candidate in SERVICE_ATTR_CANDIDATES:
+                        key = f"has_{candidate.replace('.', '_')}"
+                        if probe.get(key, 0) > 0:
+                            intel.logs.service_attribute = candidate
+                            break
+                    if not intel.logs.service_attribute:
+                        intel.logs.service_attribute = "service.name"
+
+                    # Pick the first severity attribute with data.
+                    for candidate in SEVERITY_ATTR_CANDIDATES:
+                        key = f"has_{candidate.replace('.', '_')}"
+                        if probe.get(key, 0) > 0:
+                            intel.logs.severity_attribute = candidate
+                            break
+                    if not intel.logs.severity_attribute:
+                        intel.logs.severity_attribute = "level"
+
+                    logger.info(
+                        "Log keyset() returned empty but %d logs found via count; "
+                        "enabled with service_attr=%s, severity_attr=%s",
+                        log_count,
+                        intel.logs.service_attribute,
+                        intel.logs.severity_attribute,
+                    )
+        except Exception:
+            pass
 
     # ── 7: Top Error Classes ──
     try:

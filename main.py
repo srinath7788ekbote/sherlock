@@ -179,9 +179,14 @@ TOOLS: list[Tool] = [
     Tool(
         name="investigate_service",
         description=(
-            "Use when a service is alerting, down, slow, broken, or having issues. "
-            "Runs full parallel investigation across APM, logs, K8s, synthetics, "
-            "and alerts — returns findings and fix recommendations."
+            "PRIMARY TOOL for any investigation or troubleshooting request. "
+            "Use this FIRST whenever asked to investigate, diagnose, check, "
+            "or look into a service — do NOT call individual tools (search_logs, "
+            "get_k8s_health, get_alerts, etc.) separately for an investigation. "
+            "Runs full parallel investigation across APM errors, logs, K8s health, "
+            "synthetics, golden signals, and alerts in a single call — returns "
+            "comprehensive findings, root-cause analysis, and fix recommendations. "
+            "Use individual tools only for targeted follow-up after this."
         ),
         inputSchema={
             "type": "object",
@@ -229,7 +234,8 @@ TOOLS: list[Tool] = [
         name="get_service_golden_signals",
         description=(
             "Get the four golden signals (latency, traffic, errors, saturation) "
-            "for an APM service with trend data."
+            "for an APM service with trend data. Use for targeted follow-up — "
+            "for full investigation use investigate_service instead."
         ),
         inputSchema={
             "type": "object",
@@ -246,7 +252,11 @@ TOOLS: list[Tool] = [
     # 9. get_k8s_health
     Tool(
         name="get_k8s_health",
-        description="Get Kubernetes health data for a service or namespace.",
+        description=(
+            "Get Kubernetes health data (pods, restarts, resource usage, deployments) "
+            "for a service or namespace. Use for targeted follow-up — for full "
+            "investigation use investigate_service instead."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -262,7 +272,11 @@ TOOLS: list[Tool] = [
     # 10. search_logs
     Tool(
         name="search_logs",
-        description="Search logs with filters for service, severity, and keywords.",
+        description=(
+            "Search logs with filters for service, severity, and keywords. "
+            "Use for targeted log searches — for full investigation use "
+            "investigate_service instead."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -378,13 +392,21 @@ TOOLS: list[Tool] = [
     # 17. get_alerts
     Tool(
         name="get_alerts",
-        description="Get all alert policies for the active account.",
+        description=(
+            "Get all alert policies for the active account. Takes no parameters. "
+            "Returns account-wide policies, not service-specific. For service "
+            "investigation use investigate_service instead."
+        ),
         inputSchema={"type": "object", "properties": {}},
     ),
     # 18. get_incidents
     Tool(
         name="get_incidents",
-        description="Get incidents filtered by state (open or closed).",
+        description=(
+            "Get incidents filtered by state (open or closed). Returns account-wide "
+            "incidents — does NOT accept a service name filter. Use "
+            "get_service_incidents for service-specific incidents."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -398,7 +420,10 @@ TOOLS: list[Tool] = [
     # 19. get_service_incidents
     Tool(
         name="get_service_incidents",
-        description="Get incidents related to a specific service or monitor.",
+        description=(
+            "Get incidents related to a specific service or monitor. "
+            "Use this instead of get_incidents when filtering by service name."
+        ),
         inputSchema={
             "type": "object",
             "properties": {

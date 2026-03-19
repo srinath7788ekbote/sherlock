@@ -69,8 +69,13 @@ class DiscoveryResult(BaseModel):
 
 # ── Discovery Constants ──────────────────────────────────────────────────
 
-# Discovery only needs to know if data EXISTS — use a short window.
-DISCOVERY_WINDOW_MINUTES = 30
+# Discovery only needs to know if data EXISTS — but the window must be
+# wide enough to catch data that existed any time during the investigation
+# period (e.g. a 24-hour investigation should not miss K8s/log data that
+# was present 12 hours ago but quiet in the last 30 minutes).
+# We cap at 120 minutes for efficiency: if a service had data any time
+# in the last 2 hours it's almost certainly still relevant.
+DISCOVERY_WINDOW_MINUTES = 120
 
 # Timeout for each discovery tier.
 DISCOVERY_TIMEOUT_S = 15.0
@@ -506,6 +511,19 @@ async def discover_available_data(
 
     duration_ms = int(time.time() * 1000) - start_ms
 
+    # ── Resolve & cache the actual entity names ──────────────────────
+    # Discovery uses LIKE '%candidate%' which matches, but the real
+    # appName / service.name in NR may differ from the candidate string.
+    # Query for the actual unique values and cache them so every
+    # subsequent tool uses the real name.
+    await _resolve_and_cache_entity_names(
+        available=available,
+        service_candidates=service_candidates,
+        account_id=account_id,
+        headers=headers,
+        endpoint=endpoint,
+    )
+
     return DiscoveryResult(
         available=available,
         unavailable=unavailable,
@@ -515,3 +533,127 @@ async def discover_available_data(
         total_event_types_checked=total_checked,
         discovery_timeout=timed_out,
     )
+
+
+async def _resolve_and_cache_entity_names(
+    available: dict[str, AvailableEventType],
+    service_candidates: list[str],
+    account_id: str,
+    headers: dict[str, str],
+    endpoint: str,
+) -> None:
+    """Query New Relic for the exact entity names and cache them.
+
+    When discovery confirms data via ``LIKE '%candidate%'``, the real
+    ``appName`` or ``service.name`` may be longer/different than the
+    candidate (e.g. ``eswd-prod/presentationsdfinsh/presentation-service``
+    vs the candidate ``eswd-prod/presentation-service``).
+
+    This function issues a *single* ``SELECT uniques(attr)`` query for
+    the most authoritative event type (Transaction first, then Log) to
+    learn the exact entity name.  It caches the mapping in
+    ``AccountContext`` so that **all subsequent tools** (logs, golden
+    signals, K8s, APM metrics, etc.) reuse the correct name.
+
+    Never raises — silently degrades if the query fails.
+    """
+    import httpx
+
+    # Pick the best event type to resolve from.
+    # Prefer Transaction (appName is the canonical APM entity name).
+    resolve_event = None
+    resolve_attr = None
+    resolve_candidate = None
+
+    for event_type in ("Transaction", "TransactionError", "Log"):
+        avail = available.get(event_type)
+        if avail:
+            resolve_event = event_type
+            resolve_attr = avail.matched_filter
+            resolve_candidate = avail.matched_value
+            break
+
+    if not resolve_event or not resolve_attr or not resolve_candidate:
+        return
+
+    nrql = (
+        f"SELECT uniques(`{resolve_attr}`) "
+        f"FROM {resolve_event} "
+        f"WHERE `{resolve_attr}` LIKE '%{resolve_candidate}%' "
+        f"SINCE 7 days ago"
+    )
+    escaped_nrql = nrql.replace('"', '\\"')
+    gql = GQL_NRQL_QUERY % (account_id, escaped_nrql)
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                endpoint,
+                json={"query": gql},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+
+        results = (
+            body.get("data", {})
+            .get("actor", {})
+            .get("account", {})
+            .get("nrql", {})
+            .get("results", [])
+        )
+
+        if not results:
+            return
+
+        unique_names = results[0].get(f"uniques.{resolve_attr}", [])
+        if not unique_names:
+            return
+
+        # Pick the best match among the unique names.
+        # If there's only one, use it.  If multiple, pick the one that
+        # best matches the original candidate (longest common substring).
+        from difflib import SequenceMatcher
+
+        best_name: str | None = None
+
+        if len(unique_names) == 1:
+            best_name = unique_names[0]
+        else:
+            best_score = -1.0
+            for name in unique_names:
+                score = SequenceMatcher(
+                    None,
+                    resolve_candidate.lower(),
+                    name.lower(),
+                ).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_name = name
+
+        if not best_name or best_name == resolve_candidate:
+            return
+
+        # Cache the mapping: user input → real NR entity name.
+        try:
+            from core.context import AccountContext
+
+            ctx = AccountContext()
+            if ctx.is_connected():
+                # Cache for every original candidate that the user provided.
+                for candidate in service_candidates:
+                    ctx.cache_resolved_name(candidate, best_name)
+                # Also update the AvailableEventType matched_value to the
+                # real name so queries built from discovery use it.
+                for avail in available.values():
+                    if avail.matched_value == resolve_candidate:
+                        avail.matched_value = best_name
+                logger.info(
+                    "Resolved actual entity name: '%s' → '%s' (via %s.%s)",
+                    resolve_candidate, best_name, resolve_event, resolve_attr,
+                )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        logger.debug("Entity name resolution failed: %s", exc)

@@ -4,6 +4,11 @@ Active account context for Sherlock.
 Provides a thread-safe singleton that holds the currently active
 credentials and account intelligence. Tools read from this context
 rather than passing credentials around.
+
+Also maintains a **service name resolution cache** so that once Sherlock
+discovers the actual APM entity name for a user-provided input (e.g. via
+NRQL discovery), every subsequent tool call reuses that mapping instead
+of fuzzy-matching independently.
 """
 
 import logging
@@ -32,7 +37,42 @@ class AccountContext:
                 cls._instance = super().__new__(cls)
                 cls._instance._credentials = None
                 cls._instance._intelligence = None
+                cls._instance._resolved_names: dict[str, str] = {}
             return cls._instance
+
+    # ── Resolution cache ─────────────────────────────────────────────
+
+    def cache_resolved_name(self, input_name: str, resolved_name: str) -> None:
+        """Store a mapping from user input to the real APM entity name.
+
+        Called by discovery or any tool that confirms the actual entity
+        name from New Relic data.  Subsequent calls to
+        ``get_cached_resolution`` will return this mapping.
+
+        Args:
+            input_name:    The name the user/tool originally provided.
+            resolved_name: The actual service name confirmed by NR data.
+        """
+        with self._lock:
+            key = input_name.strip().lower()
+            self._resolved_names[key] = resolved_name
+            logger.debug(
+                "Cached resolution: '%s' → '%s'", input_name, resolved_name,
+            )
+
+    def get_cached_resolution(self, input_name: str) -> str | None:
+        """Return the previously resolved real name, or None.
+
+        Args:
+            input_name: The user-provided / fuzzy name to look up.
+
+        Returns:
+            The confirmed APM entity name if previously cached, else None.
+        """
+        with self._lock:
+            return self._resolved_names.get(input_name.strip().lower())
+
+    # ── Active account management ────────────────────────────────────
 
     def set_active(
         self,
@@ -48,6 +88,7 @@ class AccountContext:
         with self._lock:
             self._credentials = credentials
             self._intelligence = intelligence
+            self._resolved_names = {}
             logger.info(
                 "Active account set: %s (region %s)",
                 credentials.account_id,
@@ -82,6 +123,7 @@ class AccountContext:
         with self._lock:
             self._credentials = None
             self._intelligence = None
+            self._resolved_names = {}
             logger.info("Active account context cleared.")
 
     @classmethod

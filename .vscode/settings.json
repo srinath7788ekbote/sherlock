@@ -29,5 +29,15 @@
             ],
             "cwd": "${workspaceFolder}"
         }
+    },
+    "chat.tools.terminal.autoApprove": {
+        "/^python -c \"import keyring; key = keyring\\.get_password\\('sherlock', 'DFIN_AD'\\); print\\(key\\[:4\\] \\+ '\\.\\.\\.' \\+ key\\[-4:\\] if key else 'NOT FOUND'\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python scripts/cli\\.py --tool learn_account$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }

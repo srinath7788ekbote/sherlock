@@ -152,6 +152,13 @@ async def get_service_golden_signals(
             credentials=credentials,
         )
 
+        # After discovery, the cache may contain the real entity name.
+        cached = ctx.get_cached_resolution(service_name)
+        if cached and cached != anchor.primary_service:
+            anchor.primary_service = cached
+            anchor.all_candidates = [cached]
+            resolved_name = cached
+
         # Filter to APM domain.
         apm_available = {
             k: v for k, v in discovery.available.items()

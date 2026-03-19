@@ -1,4 +1,4 @@
-.PHONY: install run test test-fast test-synthetics test-investigate test-dependencies test-discovery test-deeplinks test-cov lint format logs audit connect cli clean
+.PHONY: install run test test-fast test-synthetics test-investigate test-dependencies test-discovery test-deeplinks test-cov lint format logs audit connect relearn cli clean
 
 install:
 	pip install -e ".[dev]"
@@ -44,6 +44,9 @@ audit:
 
 connect:
 	python scripts/test_connection.py
+
+relearn:
+	python scripts/cli.py --profile DFIN_AD --tool learn_account
 
 cli:
 	python scripts/cli.py $(ARGS)

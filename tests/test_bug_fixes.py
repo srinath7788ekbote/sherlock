@@ -634,8 +634,8 @@ class TestDiscoveryOptimization:
     """Test discovery uses capped window, timeout, and tiered approach."""
 
     def test_discovery_window_constant_exists(self):
-        """DISCOVERY_WINDOW_MINUTES is defined and is 30."""
-        assert DISCOVERY_WINDOW_MINUTES == 30
+        """DISCOVERY_WINDOW_MINUTES is defined and is 120."""
+        assert DISCOVERY_WINDOW_MINUTES == 120
 
     def test_tier1_event_types_defined(self):
         """Tier 1 contains the 6 core event types."""
@@ -698,7 +698,7 @@ class TestDiscoveryOptimization:
 
     @pytest.mark.asyncio
     async def test_discovery_caps_window(self):
-        """Discovery uses min(since_minutes, 30) for COUNT queries."""
+        """Discovery uses min(since_minutes, 120) for COUNT queries."""
         from core.credentials import Credentials
         from core import discovery as disc_module
 
