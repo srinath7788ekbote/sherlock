@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.alerts import get_alerts, get_incidents, get_service_incidents
 from tools.apm import get_apm_applications, get_app_metrics, get_deployments
+from tools.dependencies import get_service_dependencies
 from tools.golden_signals import get_service_golden_signals
 from tools.intelligence_tools import (
     connect_account,
@@ -29,7 +30,7 @@ from tools.intelligence_tools import (
     learn_account_tool,
     list_profiles,
 )
-from tools.investigate import investigate_service
+from tools.investigate import investigate_service  # LEGACY
 from tools.k8s import get_k8s_health
 from tools.logs import search_logs
 from tools.nrql import run_nrql_query
@@ -46,7 +47,7 @@ TOOL_MAP = {
     "learn_account": learn_account_tool,
     "get_account_summary": get_account_summary,
     "get_nrql_context": get_nrql_context,
-    "investigate_service": investigate_service,
+    "investigate_service": investigate_service,  # LEGACY — prefer agent-team
     "investigate_synthetic": investigate_synthetic,
     "get_service_golden_signals": get_service_golden_signals,
     "get_k8s_health": get_k8s_health,
@@ -60,6 +61,7 @@ TOOL_MAP = {
     "get_alerts": get_alerts,
     "get_incidents": get_incidents,
     "get_service_incidents": get_service_incidents,
+    "get_service_dependencies": get_service_dependencies,
     "run_nrql_query": run_nrql_query,
 }
 

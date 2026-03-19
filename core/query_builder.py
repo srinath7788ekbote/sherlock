@@ -1,12 +1,13 @@
 """
 Adaptive query builder for Sherlock.
 
-Takes a DiscoveryResult and builds the right investigation queries
-for what was actually found. No hardcoded query lists — queries are
-constructed from the discovery results.
+DEPRECATED: This module is part of the monolith investigation architecture.
+The agent-team architecture uses direct NRQL queries in each domain tool
+instead. Kept for backward compatibility with tools/investigate.py (also
+deprecated). Do not add new code here.
 
-All NRQL templates are constants in SIGNAL_QUERIES. No inline NRQL
-strings inside functions anywhere.
+Original purpose: Takes a DiscoveryResult and builds investigation queries
+for what was actually found.
 """
 
 import logging

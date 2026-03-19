@@ -698,7 +698,7 @@ class TestDiscoveryOptimization:
 
     @pytest.mark.asyncio
     async def test_discovery_caps_window(self):
-        """Discovery uses min(since_minutes, 120) for COUNT queries."""
+        """Discovery window scales with since_minutes, capped at DISCOVERY_MAX_WINDOW_MINUTES."""
         from core.credentials import Credentials
         from core import discovery as disc_module
 
@@ -724,9 +724,15 @@ class TestDiscoveryOptimization:
                 credentials=creds,
             )
 
-        # All captured since_minutes values should be capped at 30.
+        # Discovery window should be capped at DISCOVERY_MAX_WINDOW_MINUTES (1440).
         for val in captured_since:
-            assert val <= DISCOVERY_WINDOW_MINUTES, f"Discovery used {val} minutes, should be ≤ {DISCOVERY_WINDOW_MINUTES}"
+            assert val <= disc_module.DISCOVERY_MAX_WINDOW_MINUTES, (
+                f"Discovery used {val} minutes, should be ≤ {disc_module.DISCOVERY_MAX_WINDOW_MINUTES}"
+            )
+            # Must be at least DISCOVERY_WINDOW_MINUTES (120) — the floor.
+            assert val >= DISCOVERY_WINDOW_MINUTES, (
+                f"Discovery used {val} minutes, should be ≥ {DISCOVERY_WINDOW_MINUTES}"
+            )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -822,7 +828,8 @@ class TestLogAnalysisPatterns:
     def test_recommendation_includes_kubectl(self):
         """Integration test: crash findings generate kubectl recommendations."""
         # This tests the recommendation generator in investigate.py.
-        from tools.investigate import _generate_recommendations, InvestigationAnchor
+        from tools.investigate import _generate_recommendations
+        from core.utils import InvestigationAnchor
 
         anchor = InvestigationAnchor(
             primary_service="test-svc",
@@ -842,7 +849,8 @@ class TestLogAnalysisPatterns:
 
     def test_dependency_recommendation_includes_kubectl(self):
         """Dependency failure findings generate kubectl recommendations."""
-        from tools.investigate import _generate_recommendations, InvestigationAnchor
+        from tools.investigate import _generate_recommendations
+        from core.utils import InvestigationAnchor
 
         anchor = InvestigationAnchor(
             primary_service="test-svc",

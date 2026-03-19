@@ -1,10 +1,13 @@
 """
-Service investigation mega-tool for Sherlock.
+Service investigation tool for Sherlock.
 
-Three-phase adaptive investigation engine:
-  Phase 1 — ANCHOR & RESOLVE: Find the incident, anchor time window, resolve candidates.
-  Phase 2 — DISCOVER: Ask New Relic what data exists for this service.
-  Phase 3 — ADAPTIVE INVESTIGATE: Query only discovered data, generate findings.
+DEPRECATED: This monolith three-phase investigation engine is superseded by
+the agent-team architecture (sherlock-team-lead + 6 domain agents). Retained
+for backward compatibility and as a quick-check fallback when agents are
+unavailable.
+
+Shared utilities (InvestigationAnchor, safe_extract_results, etc.) have been
+moved to core.utils. This module re-exports them for backward compatibility.
 """
 
 import asyncio
@@ -42,18 +45,16 @@ from core.sanitize import (
     sanitize_service_name,
 )
 
+# Re-export shared utilities from core.utils for backward compatibility.
+# Other modules (golden_signals, k8s, tests) import these from here.
+from core.utils import (  # noqa: F401
+    InvestigationAnchor,
+    IncidentPattern,
+    safe_extract_results as _safe_extract_results,
+    strip_null_timeseries as _strip_null_timeseries,
+)
+
 logger = logging.getLogger("sherlock.tools.investigate")
-
-
-def _safe_extract_results(body: dict) -> list[dict]:
-    """Safely navigate ``data.actor.account.nrql.results`` even when
-    intermediate values are *None* rather than missing."""
-    d = body if isinstance(body, dict) else {}
-    for key in ("data", "actor", "account", "nrql", "results"):
-        d = d.get(key) if isinstance(d, dict) else None
-        if d is None:
-            return []
-    return d if isinstance(d, list) else []
 
 
 # Investigation timeout for the entire operation.
@@ -101,34 +102,7 @@ GQL_RECENT_INCIDENTS = """
 """
 
 
-# ── Pydantic Models ─────────────────────────────────────────────────────
-
-
-class IncidentPattern(BaseModel):
-    """Pattern analysis across recent incidents for the same service."""
-
-    occurrence_count: int = 0
-    first_occurrence: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_occurrence: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    is_recurring: bool = False
-    recurrence_interval_hours: float | None = None
-    consistent_cause: str | None = None
-    pattern_summary: str = ""
-
-
-class InvestigationAnchor(BaseModel):
-    """Anchors an investigation to the correct time window and service."""
-
-    primary_service: str = ""
-    all_candidates: list[str] = Field(default_factory=list)
-    active_incident: dict | None = None
-    recent_incidents: list[dict] = Field(default_factory=list)
-    window_start: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    window_end: datetime | None = None
-    since_minutes: int = 60
-    until_clause: str = ""
-    window_source: str = "default"
-    incident_pattern: IncidentPattern | None = None
+# Models are now in core.utils — imported and re-exported at the top of this file.
 
 
 # ── Phase 1: Anchor & Resolve ───────────────────────────────────────────
@@ -603,60 +577,7 @@ async def _run_signal_query(
         raise
 
 
-def _strip_null_timeseries(results: list[dict]) -> list[dict]:
-    """Remove timeseries buckets where all metric values are null.
-
-    NRQL TIMESERIES queries return a bucket for every time window even when
-    there is no data, filling metric columns with ``None``.  For sparse
-    services this produces hundreds of useless rows.  Strip them so the
-    output stays compact and readable.
-    """
-    if not results or not isinstance(results, list):
-        return results
-
-    # Detect timeseries rows by the presence of begin/endTimeSeconds.
-    ts_keys = {"beginTimeSeconds", "endTimeSeconds"}
-    filtered: list[dict] = []
-    for row in results:
-        if not isinstance(row, dict):
-            filtered.append(row)
-            continue
-        if not ts_keys.issubset(row.keys()):
-            # Not a timeseries row — keep as-is.
-            filtered.append(row)
-            continue
-        # Check whether every non-timestamp value is None / null.
-        metric_vals = [v for k, v in row.items() if k not in ts_keys]
-        if any(v is not None for v in metric_vals):
-            filtered.append(row)
-
-    # If the filtered timeseries is still very long and all metric values are
-    # identical (e.g. hundreds of buckets with error_rate=0.0), compact it
-    # into a short summary to keep output readable.
-    if len(filtered) > 20 and all(
-        isinstance(r, dict) and ts_keys.issubset(r.keys()) for r in filtered
-    ):
-        metric_keys = [
-            k for k in filtered[0] if k not in ts_keys
-        ]
-        # Collect unique metric value tuples.
-        unique_vals = {
-            tuple(r.get(k) for k in metric_keys) for r in filtered
-        }
-        if len(unique_vals) == 1:
-            # Every single bucket has the same metrics — summarize.
-            vals = next(iter(unique_vals))
-            summary: dict = {
-                "summary": "constant_value",
-                "bucket_count": len(filtered),
-                "first_bucket": filtered[0]["beginTimeSeconds"],
-                "last_bucket": filtered[-1]["endTimeSeconds"],
-            }
-            for k, v in zip(metric_keys, vals):
-                summary[k] = v
-            return [summary]
-
-    return filtered
+# _strip_null_timeseries is now imported from core.utils (see top of file).
 
 
 def _severity_emoji(finding: str) -> str:
@@ -678,6 +599,61 @@ def _overall_status(findings: list[dict]) -> str:
     if "WARNING" in severities:
         return "WARNING"
     return "HEALTHY"
+
+
+def _build_domain_status(
+    discovery: Any,
+    findings: list[dict],
+) -> dict[str, dict]:
+    """Build a comprehensive status dict for every domain.
+
+    Returns a mapping of domain → {status, has_data, label, findings_count}
+    covering ALL domains in the registry, not just those with data.
+
+    Status values:
+        GREEN   – data found, no issues
+        AMBER   – data found, warnings present
+        RED     – data found, critical issues detected
+        NO_DATA – domain was checked but no data found
+    """
+    from core.discovery import ALL_DOMAINS
+
+    status_map: dict[str, dict] = {}
+    for domain in ALL_DOMAINS:
+        source_upper = domain.upper()
+        domain_findings = [
+            f for f in findings
+            if f.get("source", "").upper() == source_upper
+        ]
+        has_data = domain in discovery.domains_with_data
+        has_critical = any(
+            f.get("severity") == "CRITICAL" for f in domain_findings
+        )
+        has_warning = any(
+            f.get("severity") == "WARNING" for f in domain_findings
+        )
+
+        if not has_data:
+            status = "NO_DATA"
+            label = f"No {domain} data found for this service"
+        elif has_critical:
+            status = "RED"
+            label = "Critical issues detected"
+        elif has_warning:
+            status = "AMBER"
+            label = "Warnings detected"
+        else:
+            status = "GREEN"
+            label = "Healthy"
+
+        status_map[domain] = {
+            "status": status,
+            "has_data": has_data,
+            "label": label,
+            "findings_count": len(domain_findings),
+        }
+
+    return status_map
 
 
 def _generate_recommendations(
@@ -1155,12 +1131,27 @@ def _inject_recommendation_links(
         pass
 
 
+def _build_domain_coverage_summary(domain_status: dict[str, dict]) -> str:
+    """Build a one-line human-readable domain coverage string.
+
+    Example:
+        "apm=RED | browser=NO_DATA | infra=NO_DATA | k8s=GREEN |
+         logs=AMBER | messaging=NO_DATA | synthetics=NO_DATA"
+    """
+    items: list[str] = []
+    for domain in sorted(domain_status):
+        info = domain_status[domain]
+        items.append(f"{domain}={info['status']}")
+    return " | ".join(items)
+
+
 def _build_diagnosis_summary(
     anchor: InvestigationAnchor,
     findings: list[dict],
     recommendations: list[dict],
     domains_with_data: list[str],
     dep_health: DependencyHealthResult | None = None,
+    domain_status: dict[str, dict] | None = None,
 ) -> str:
     """Build a human-readable diagnosis summary."""
     parts: list[str] = []
@@ -1175,8 +1166,12 @@ def _build_diagnosis_summary(
             f"Investigation window: last {anchor.since_minutes} minutes"
         )
 
-    # Domains.
-    if domains_with_data:
+    # Domain coverage — always present so the LLM reports it.
+    if domain_status:
+        parts.append(
+            f"Domain coverage: {_build_domain_coverage_summary(domain_status)}"
+        )
+    elif domains_with_data:
         parts.append(f"Data found in: {', '.join(domains_with_data)}")
 
     # Critical findings count.
@@ -1445,9 +1440,11 @@ async def investigate_service(
             recommendations, anchor, entity_guid, effective_ns, intelligence
         )
 
+        domain_status = _build_domain_status(discovery, findings)
+
         diagnosis_summary = _build_diagnosis_summary(
             anchor, findings, recommendations, discovery.domains_with_data,
-            dep_health,
+            dep_health, domain_status,
         )
 
         # ── PATTERN ANALYSIS ───────────────────────────────────
@@ -1500,25 +1497,9 @@ async def investigate_service(
                     },
                     "overall_status": _overall_status(findings),
                     "diagnosis_summary": diagnosis_summary,
-                    "domains_investigated": discovery.domains_with_data,
-                    "domains_no_data": [
-                        d
-                        for d in [
-                            "k8s",
-                            "apm",
-                            "logs",
-                            "synthetics",
-                            "infra",
-                            "browser",
-                            "messaging",
-                        ]
-                        if d not in discovery.domains_with_data
-                    ],
-                    "domains_no_data_hint": (
-                        "If key domains like k8s or logs appear in "
-                        "domains_no_data, use individual tools "
-                        "(get_k8s_health, search_logs) with the full "
-                        "time window as a follow-up to confirm."
+                    "domains_investigated": domain_status,
+                    "domain_coverage_summary": _build_domain_coverage_summary(
+                        domain_status
                     ),
                     "discovery_duration_ms": discovery.discovery_duration_ms,
                     "active_incident": anchor.active_incident,

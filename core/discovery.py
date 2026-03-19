@@ -1,10 +1,13 @@
 """
 Discovery engine for Sherlock.
 
-Asks New Relic "what data exists for this service in this time window?"
-before deciding what to investigate. The EVENT_REGISTRY is the single
-source of truth for known event types — adding a new event type here
-is the only code change needed to make Sherlock aware of it.
+DEPRECATED: This module is part of the monolith investigation architecture.
+The agent-team architecture uses direct NRQL queries in each domain tool
+instead. Kept for backward compatibility with tools/investigate.py (also
+deprecated). Do not add new code here.
+
+Original purpose: Asks New Relic "what data exists for this service in this
+time window?" before deciding what to investigate.
 """
 
 import asyncio
@@ -69,24 +72,28 @@ class DiscoveryResult(BaseModel):
 
 # ── Discovery Constants ──────────────────────────────────────────────────
 
-# Discovery only needs to know if data EXISTS — but the window must be
-# wide enough to catch data that existed any time during the investigation
-# period (e.g. a 24-hour investigation should not miss K8s/log data that
-# was present 12 hours ago but quiet in the last 30 minutes).
-# We cap at 120 minutes for efficiency: if a service had data any time
-# in the last 2 hours it's almost certainly still relevant.
+# Discovery needs to know if data EXISTS.  The window must be wide
+# enough to cover the full investigation period so that data present
+# e.g. 12 hours ago (but quiet recently) is not missed.
+# Floor: always check at least DISCOVERY_WINDOW_MINUTES (120 min).
+# Ceiling: never exceed DISCOVERY_MAX_WINDOW_MINUTES (1440 min / 24 h).
 DISCOVERY_WINDOW_MINUTES = 120
+DISCOVERY_MAX_WINDOW_MINUTES = 1440
 
-# Timeout for each discovery tier.
-DISCOVERY_TIMEOUT_S = 15.0
+# Single timeout for the full discovery pass (all event types in parallel).
+DISCOVERY_TIMEOUT_S = 45.0
 
-# Tier 1: Always checked — core event types.
+# Maximum concurrent NerdGraph requests during discovery.
+DISCOVERY_CONCURRENCY = 10
+
+# Tier constants kept for backward-compatibility with tests/imports.
+# Discovery no longer gates any tier on prior results — all event types
+# are probed unconditionally in a single parallel pass.
 TIER1_EVENT_TYPES = {
     "Transaction", "TransactionError", "Log",
     "K8sPodSample", "K8sDeploymentSample", "SyntheticCheck",
 }
 
-# Tier 2: Only checked if Tier 1 found K8s data.
 TIER2_EVENT_TYPES = {
     "K8sContainerSample", "K8sHpaSample", "K8sReplicaSetSample",
     "InfrastructureEvent", "K8sNodeSample",
@@ -267,8 +274,52 @@ EVENT_REGISTRY: dict[str, EventTypeInfo] = {
     ),
 }
 
+# All domains represented in the EVENT_REGISTRY.
+ALL_DOMAINS = sorted({info.domain for info in EVENT_REGISTRY.values()})
+
 
 # ── Discovery Engine ─────────────────────────────────────────────────────
+
+
+async def _safe_nrql_count(
+    nrql: str,
+    account_id: str,
+    headers: dict[str, str],
+    endpoint: str,
+) -> int:
+    """Execute a count NRQL query and return the count, or 0 on any error.
+
+    Handles NerdGraph responses where intermediate keys are ``None``
+    (e.g. ``"nrql": null`` on query syntax errors) without crashing.
+    """
+    import httpx
+
+    escaped = nrql.replace('"', '\\"')
+    gql = GQL_NRQL_QUERY % (account_id, escaped)
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                endpoint,
+                json={"query": gql},
+                headers=headers,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+
+        # Safe navigation — any ``None`` intermediate stops the chain.
+        d = body
+        for key in ("data", "actor", "account", "nrql", "results"):
+            d = d.get(key) if isinstance(d, dict) else None
+            if d is None:
+                return 0
+
+        if isinstance(d, list) and d:
+            count = d[0].get("event_count", 0)
+            return int(count) if count else 0
+        return 0
+    except Exception:
+        return 0
 
 
 async def _check_event_type(
@@ -283,62 +334,78 @@ async def _check_event_type(
 ) -> AvailableEventType | None:
     """Check whether an event type has data for any service candidate.
 
-    Tries each service filter attribute in order until one returns count > 0.
-    Returns None if no data found for any candidate/filter combination.
+    Per-candidate existence check: for each candidate, build ONE query
+    with all filter attributes OR'd (short query).  Short-circuit on the
+    first candidate that returns count > 0.  Then identify the specific
+    matched filter attribute for downstream query building.
+
+    Attribute names with dots (e.g. ``label.app``) are backtick-quoted;
+    plain names are left unquoted for maximum NRQL compatibility.
     """
-    import httpx
+    safe_candidates = [c.replace("'", "").replace('"', "") for c in service_candidates]
 
-    for candidate in service_candidates:
-        for filter_attr in info.service_filters:
-            # Sanitize candidate for NRQL embedding.
-            safe_candidate = candidate.replace("'", "").replace('"', "")
-            nrql = (
-                f"SELECT count(*) as event_count "
-                f"FROM {event_type} "
-                f"WHERE `{filter_attr}` LIKE '%{safe_candidate}%' "
-                f"SINCE {since_minutes} minutes ago "
-                f"{until_clause}"
+    def _attr_ref(fattr: str) -> str:
+        return f"`{fattr}`" if "." in fattr else fattr
+
+    # ── Phase 1: Per-candidate existence check ──
+    # Each candidate → ONE query with all filters OR'd (~4 OR parts).
+    # Short-circuit on first match.
+    matched_candidate: str | None = None
+    total_count = 0
+
+    for safe in safe_candidates:
+        or_parts = [
+            f"{_attr_ref(f)} LIKE '%{safe}%'" for f in info.service_filters
+        ]
+        where_clause = " OR ".join(or_parts)
+        nrql = (
+            f"SELECT count(*) as event_count "
+            f"FROM {event_type} "
+            f"WHERE ({where_clause}) "
+            f"SINCE {since_minutes} minutes ago "
+            f"{until_clause}"
+        )
+
+        count = await _safe_nrql_count(nrql, account_id, headers, endpoint)
+        if count > 0:
+            matched_candidate = safe
+            total_count = count
+            break
+
+    if not matched_candidate:
+        return None
+
+    # ── Phase 2: Identify which filter attribute matched ──
+    for fattr in info.service_filters:
+        nrql = (
+            f"SELECT count(*) as event_count "
+            f"FROM {event_type} "
+            f"WHERE {_attr_ref(fattr)} LIKE '%{matched_candidate}%' "
+            f"SINCE {since_minutes} minutes ago "
+            f"{until_clause}"
+        )
+
+        count = await _safe_nrql_count(nrql, account_id, headers, endpoint)
+        if count > 0:
+            return AvailableEventType(
+                event_type=event_type,
+                domain=info.domain,
+                event_count=count,
+                matched_filter=fattr,
+                matched_value=matched_candidate,
+                signals=info.signals,
             )
-            escaped_nrql = nrql.replace('"', '\\"')
-            gql = GQL_NRQL_QUERY % (account_id, escaped_nrql)
 
-            try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    resp = await client.post(
-                        endpoint,
-                        json={"query": gql},
-                        headers=headers,
-                    )
-                    resp.raise_for_status()
-                    body = resp.json()
-
-                results = (
-                    body.get("data", {})
-                    .get("actor", {})
-                    .get("account", {})
-                    .get("nrql", {})
-                    .get("results", [])
-                )
-
-                if results:
-                    count = results[0].get("event_count", 0)
-                    if count and count > 0:
-                        return AvailableEventType(
-                            event_type=event_type,
-                            domain=info.domain,
-                            event_count=int(count),
-                            matched_filter=filter_attr,
-                            matched_value=safe_candidate,
-                            signals=info.signals,
-                        )
-            except Exception as exc:
-                logger.debug(
-                    "Discovery check failed for %s/%s: %s",
-                    event_type, filter_attr, exc,
-                )
-                continue
-
-    return None
+    # Phase 1 confirmed data but Phase 2 couldn't pinpoint the filter
+    # (transient errors). Return with best-guess defaults.
+    return AvailableEventType(
+        event_type=event_type,
+        domain=info.domain,
+        event_count=total_count,
+        matched_filter=info.service_filters[0],
+        matched_value=matched_candidate,
+        signals=info.signals,
+    )
 
 
 async def discover_available_data(
@@ -349,21 +416,20 @@ async def discover_available_data(
 ) -> DiscoveryResult:
     """Discover which event types have data for the given service candidates.
 
-    Uses tiered discovery with a capped time window and timeout:
-      Tier 1 (always): Transaction, TransactionError, Log, K8sPodSample,
-                        K8sDeploymentSample, SyntheticCheck
-      Tier 2 (if K8s found): K8sContainerSample, K8sHpaSample,
-                              K8sReplicaSetSample, InfrastructureEvent, K8sNodeSample
-      Tier 3 (conditional): PageView, SystemSample, QueueSample, etc.
+    Probes ALL event types in the EVENT_REGISTRY unconditionally in a single
+    parallel pass, controlled by a semaphore for concurrency.  No tiering is
+    applied — every domain (apm, k8s, logs, infra, browser, synthetics,
+    messaging) is checked regardless of what other domains return.
 
-    Discovery COUNT queries use min(since_minutes, 30) for speed.
-    Each tier has a 15-second timeout; on timeout returns sensible defaults.
+    The discovery window scales with the investigation window: it uses
+    ``max(since_minutes, 120)`` capped at 1440 minutes (24 h) so that
+    data from earlier in long investigations is not missed.
 
     Args:
         service_candidates: List of candidate service names to check.
         anchor: InvestigationAnchor with since_minutes and until_clause.
         credentials: Active account credentials.
-        intelligence: Optional AccountIntelligence for tier 3 decisions.
+        intelligence: Unused (kept for backward compatibility).
 
     Returns:
         DiscoveryResult listing which event types have data.
@@ -384,8 +450,13 @@ async def discover_available_data(
     endpoint = credentials.endpoint
     account_id = credentials.account_id
 
-    # Cap discovery window for efficiency — discovery only checks existence.
-    discovery_since = min(anchor.since_minutes, DISCOVERY_WINDOW_MINUTES)
+    # Scale discovery window to the investigation window so that data
+    # present earlier in long investigations (e.g. 24 h) is not missed.
+    # Floor: DISCOVERY_WINDOW_MINUTES (120).  Ceiling: DISCOVERY_MAX_WINDOW_MINUTES (1440).
+    discovery_since = min(
+        max(anchor.since_minutes, DISCOVERY_WINDOW_MINUTES),
+        DISCOVERY_MAX_WINDOW_MINUTES,
+    )
     until_clause = anchor.until_clause
 
     available: dict[str, AvailableEventType] = {}
@@ -426,19 +497,30 @@ async def discover_available_data(
                 service_filter_map[name] = result.matched_filter
                 domains_seen.add(result.domain)
 
-    # ── Tier 1: Core event types (always checked) ──
-    tier1_names, tier1_tasks = _build_tasks(TIER1_EVENT_TYPES)
-    total_checked += len(tier1_names)
+    # ── Check ALL event types unconditionally ──
+    # Every domain is probed in a single parallel pass controlled by a
+    # semaphore.  No tiering — completeness over speed.
+    all_names, all_coros = _build_tasks(set(EVENT_REGISTRY.keys()))
+    total_checked = len(all_names)
+
+    semaphore = asyncio.Semaphore(DISCOVERY_CONCURRENCY)
+
+    async def _throttled(coro):
+        async with semaphore:
+            return await coro
 
     try:
-        tier1_results = await asyncio.wait_for(
-            asyncio.gather(*tier1_tasks, return_exceptions=True),
+        all_results = await asyncio.wait_for(
+            asyncio.gather(
+                *[_throttled(c) for c in all_coros],
+                return_exceptions=True,
+            ),
             timeout=DISCOVERY_TIMEOUT_S,
         )
-        _process_results(tier1_names, tier1_results)
+        _process_results(all_names, all_results)
     except asyncio.TimeoutError:
         logger.warning(
-            "Discovery Tier 1 timed out after %.0fs — using defaults",
+            "Discovery timed out after %.0fs — using defaults",
             DISCOVERY_TIMEOUT_S,
         )
         timed_out = True
@@ -458,53 +540,8 @@ async def discover_available_data(
             service_filter_map["Log"] = "service.name"
             domains_seen.update({"apm", "logs"})
 
-    # ── Tier 2: Extended K8s (only if Tier 1 found K8s data) ──
-    if not timed_out and "k8s" in domains_seen:
-        tier2_names, tier2_tasks = _build_tasks(TIER2_EVENT_TYPES)
-        total_checked += len(tier2_names)
-
-        if tier2_tasks:
-            try:
-                tier2_results = await asyncio.wait_for(
-                    asyncio.gather(*tier2_tasks, return_exceptions=True),
-                    timeout=DISCOVERY_TIMEOUT_S,
-                )
-                _process_results(tier2_names, tier2_results)
-            except asyncio.TimeoutError:
-                logger.warning("Discovery Tier 2 timed out")
-                unavailable.extend(tier2_names)
-
-    # ── Tier 3: Conditional event types ──
-    if not timed_out:
-        tier3_types: set[str] = set()
-        if intelligence:
-            if getattr(getattr(intelligence, "browser", None), "enabled", False):
-                tier3_types.add("PageView")
-            if getattr(getattr(intelligence, "infra", None), "host_count", 0) > 0:
-                tier3_types.add("SystemSample")
-        # Add messaging if candidates suggest queue/message services.
-        for svc in service_candidates:
-            if any(kw in svc.lower() for kw in ("queue", "message", "kafka", "rabbit", "sqs")):
-                tier3_types.add("QueueSample")
-                tier3_types.add("MessageBrokerSample")
-
-        if tier3_types:
-            tier3_names, tier3_tasks = _build_tasks(tier3_types)
-            total_checked += len(tier3_names)
-
-            if tier3_tasks:
-                try:
-                    tier3_results = await asyncio.wait_for(
-                        asyncio.gather(*tier3_tasks, return_exceptions=True),
-                        timeout=DISCOVERY_TIMEOUT_S,
-                    )
-                    _process_results(tier3_names, tier3_results)
-                except asyncio.TimeoutError:
-                    logger.warning("Discovery Tier 3 timed out")
-                    unavailable.extend(tier3_names)
-
-    # Mark remaining unchecked event types as unavailable.
-    checked_set = set(n for n in available) | set(unavailable)
+    # Mark any event types not already categorized as unavailable.
+    checked_set = set(available) | set(unavailable)
     for et in EVENT_REGISTRY:
         if et not in checked_set:
             unavailable.append(et)

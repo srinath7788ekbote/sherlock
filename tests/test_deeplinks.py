@@ -352,6 +352,7 @@ class TestInvestigateLinkInjection:
     ):
         """Mock investigate_service, verify service_overview in report."""
         from tools.investigate import investigate_service
+        from core.utils import InvestigationAnchor  # noqa: F811
 
         result = await investigate_service("payment-svc-prod", since_minutes=30)
         data = json.loads(result)
@@ -367,10 +368,8 @@ class TestInvestigateLinkInjection:
         self, mock_context, mock_nerdgraph
     ):
         """When an error_rate finding fires, it should include a spike_chart URL."""
-        from tools.investigate import (
-            InvestigationAnchor,
-            _inject_finding_deep_links,
-        )
+        from tools.investigate import _inject_finding_deep_links
+        from core.utils import InvestigationAnchor
 
         findings = [
             {
@@ -402,10 +401,8 @@ class TestInvestigateLinkInjection:
         self, mock_context, mock_nerdgraph
     ):
         """A finding with no matching link rule should have no deep_link."""
-        from tools.investigate import (
-            InvestigationAnchor,
-            _inject_finding_deep_links,
-        )
+        from tools.investigate import _inject_finding_deep_links
+        from core.utils import InvestigationAnchor
 
         findings = [
             {
@@ -429,10 +426,8 @@ class TestInvestigateLinkInjection:
         self, mock_context, mock_nerdgraph
     ):
         """P1 APM recommendation includes error_profile link."""
-        from tools.investigate import (
-            InvestigationAnchor,
-            _inject_recommendation_links,
-        )
+        from tools.investigate import _inject_recommendation_links
+        from core.utils import InvestigationAnchor
 
         recs = [
             {

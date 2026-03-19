@@ -25,7 +25,7 @@ from core.query_builder import (
     _check_error_logs,
     _check_queue_depth,
 )
-from tools.investigate import InvestigationAnchor
+from core.utils import InvestigationAnchor
 
 
 @pytest.fixture

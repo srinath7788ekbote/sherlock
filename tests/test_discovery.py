@@ -20,7 +20,7 @@ from core.discovery import (
     _check_event_type,
     discover_available_data,
 )
-from tools.investigate import InvestigationAnchor
+from core.utils import InvestigationAnchor
 
 
 @pytest.fixture
@@ -170,12 +170,10 @@ class TestDiscoverRunsAllChecksInParallel:
             credentials=mock_credentials,
         )
 
-        # With tiered discovery, at minimum Tier 1 (6 event types) is checked.
-        # Tier 2+ only runs if K8s data is found in Tier 1.
-        # Since all responses return 0, only Tier 1 runs.
-        assert result.total_event_types_checked >= len(TIER1_EVENT_TYPES)
+        # All event types are checked unconditionally in a single pass.
+        assert result.total_event_types_checked == len(EVENT_REGISTRY)
         # All checked types should be unavailable since we returned 0 for everything.
-        assert len(result.unavailable) >= len(TIER1_EVENT_TYPES)
+        assert len(result.unavailable) == len(EVENT_REGISTRY)
 
 
 class TestDiscoverReturnsDomainWithData:

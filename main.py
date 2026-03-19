@@ -145,8 +145,10 @@ TOOLS: list[Tool] = [
     Tool(
         name="learn_account",
         description=(
-            "Re-learn the active account's structure. Forces a refresh of "
-            "services, namespaces, monitors, and all other intelligence."
+            "Discover ALL entity names, types, and relationships in the active account. "
+            "MUST be called before any investigation to get real service names, K8s "
+            "deployment names, synthetic monitor names, and entity relationships. "
+            "Results are cached — subsequent calls refresh the cache."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
@@ -179,14 +181,11 @@ TOOLS: list[Tool] = [
     Tool(
         name="investigate_service",
         description=(
-            "PRIMARY TOOL for any investigation or troubleshooting request. "
-            "Use this FIRST whenever asked to investigate, diagnose, check, "
-            "or look into a service — do NOT call individual tools (search_logs, "
-            "get_k8s_health, get_alerts, etc.) separately for an investigation. "
-            "Runs full parallel investigation across APM errors, logs, K8s health, "
-            "synthetics, golden signals, and alerts in a single call — returns "
-            "comprehensive findings, root-cause analysis, and fix recommendations. "
-            "Use individual tools only for targeted follow-up after this."
+            "[LEGACY] Quick automated check across all domains for a service. "
+            "Returns findings with domain-level status and recommendations. "
+            "For comprehensive investigation, use the agent-team pattern "
+            "(sherlock-team-lead dispatching to all 6 domain agents) instead. "
+            "Use this tool ONLY for a fast summary or when agents are not available."
         ),
         inputSchema={
             "type": "object",
@@ -234,8 +233,7 @@ TOOLS: list[Tool] = [
         name="get_service_golden_signals",
         description=(
             "Get the four golden signals (latency, traffic, errors, saturation) "
-            "for an APM service with trend data. Use for targeted follow-up — "
-            "for full investigation use investigate_service instead."
+            "for an APM service with trend data. Essential for APM domain analysis."
         ),
         inputSchema={
             "type": "object",
@@ -254,8 +252,8 @@ TOOLS: list[Tool] = [
         name="get_k8s_health",
         description=(
             "Get Kubernetes health data (pods, restarts, resource usage, deployments) "
-            "for a service or namespace. Use for targeted follow-up — for full "
-            "investigation use investigate_service instead."
+            "for a service or namespace. Use the BARE deployment name (after '/') "
+            "and namespace (before '/') for best results."
         ),
         inputSchema={
             "type": "object",
@@ -274,8 +272,7 @@ TOOLS: list[Tool] = [
         name="search_logs",
         description=(
             "Search logs with filters for service, severity, and keywords. "
-            "Use for targeted log searches — for full investigation use "
-            "investigate_service instead."
+            "Essential for log domain analysis and error pattern detection."
         ),
         inputSchema={
             "type": "object",
@@ -394,8 +391,7 @@ TOOLS: list[Tool] = [
         name="get_alerts",
         description=(
             "Get all alert policies for the active account. Takes no parameters. "
-            "Returns account-wide policies, not service-specific. For service "
-            "investigation use investigate_service instead."
+            "Returns account-wide policies, not service-specific."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),

@@ -614,7 +614,6 @@ class TestInvestigationReportStructure:
             assert "overall_status" in report
             assert "window" in report
             assert "domains_investigated" in report
-            assert "domains_no_data_hint" in report
 
     @respx.mock
     @pytest.mark.asyncio

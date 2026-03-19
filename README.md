@@ -39,58 +39,99 @@ This MCP server exposes **21 tools** that let an AI assistant query your New Rel
 ### Key Capabilities
 
 - **Read-only by design** — every NerdGraph mutation is blocked at the client layer
+- **Agent-team architecture** — 7 specialized agents + 7 skills for comprehensive investigation
 - **Multi-tenant** — switch between accounts/profiles without restarting
 - **Fuzzy name resolution** — typos in service or monitor names are auto-corrected
 - **Prompt-injection scrubbing** — all tool output is scanned before returning to the LLM
-- **Parallel data fetching** — investigation tools fire queries concurrently for speed
+- **Parallel data fetching** — domain agents operate concurrently for speed
 - **Credential security** — API keys stored in OS keychain via `keyring`, never in plain text
 - **Deep links** — every finding includes a clickable URL to the exact New Relic UI view
-- **Adaptive data discovery** — the investigation engine queries only event types that have data
 - **Service dependency mapping** — automatic dependency graph built from spans, logs, and naming patterns
-- **Three-phase investigation** — anchor the incident, discover available data, then adaptively investigate
 
 ---
 
 ## Architecture
 
+Sherlock uses a **multi-agent team** architecture for comprehensive investigations.
+A Team Lead orchestrates 6 specialist agents, each calling domain-specific MCP tools directly.
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    AI Assistant (LLM)                    │
-│              (GitHub Copilot / Claude / Cursor)          │
-└──────────────────────────┬──────────────────────────────┘
-                           │ stdio (MCP protocol)
-┌──────────────────────────▼──────────────────────────────┐
-│                      main.py                             │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │ Tool Router  │  │ Audit Logger │  │ Response Scrub │  │
-│  └──────┬──────┘  └──────────────┘  └────────────────┘  │
-│         │                                                │
-│  ┌──────▼──────────────────────────────────────────────┐│
-│  │                   tools/ layer                       ││
-│  │  entities │ nrql │ alerts │ apm │ logs │ k8s        ││
-│  │  golden_signals │ synthetics │ investigate           ││
-│  │  intelligence_tools │ dependencies                   ││
-│  └──────┬──────────────────────────────────────────────┘│
-│         │                                                │
-│  ┌──────▼──────────────────────────────────────────────┐│
-│  │                  core/ layer                         ││
-│  │  context │ credentials │ intelligence │ cache        ││
-│  │  sanitize │ exceptions │ deeplinks                   ││
-│  │  discovery │ query_builder                           ││
-│  │  dependency_graph │ graph_builder                    ││
-│  └──────┬──────────────────────────────────────────────┘│
-│         │                                                │
-│  ┌──────▼──────────────────────────────────────────────┐│
-│  │               client/ layer                          ││
-│  │  NerdGraphClient (httpx + tenacity retry)            ││
-│  │  Read-only enforcement │ Batch queries               ││
-│  └─────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
-                           │
-                    NerdGraph GraphQL API
-              US: https://api.newrelic.com/graphql
-              EU: https://api.eu.newrelic.com/graphql
+┌─────────────────────────────────────────────────────────────┐
+│                    AI Assistant (LLM)                        │
+│              (GitHub Copilot / Claude / Cursor)              │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ stdio (MCP protocol)
+┌───────────────────────────▼─────────────────────────────────┐
+│                       main.py                                │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐      │
+│  │ Tool Router  │  │ Audit Logger │  │ Response Scrub │      │
+│  └──────┬──────┘  └──────────────┘  └────────────────┘      │
+│         │                                                    │
+│  ┌──────▼──────────────────────────────────────────────────┐ │
+│  │                   tools/ layer                          │ │
+│  │  entities │ nrql │ alerts │ apm │ logs │ k8s           │ │
+│  │  golden_signals │ synthetics │ dependencies             │ │
+│  │  intelligence_tools │ investigate [LEGACY]              │ │
+│  └──────┬──────────────────────────────────────────────────┘ │
+│         │                                                    │
+│  ┌──────▼──────────────────────────────────────────────────┐ │
+│  │                  core/ layer                            │ │
+│  │  context │ credentials │ intelligence │ cache           │ │
+│  │  sanitize │ exceptions │ deeplinks │ utils              │ │
+│  │  dependency_graph │ graph_builder                       │ │
+│  │  discovery [DEPRECATED] │ query_builder [DEPRECATED]    │ │
+│  └──────┬──────────────────────────────────────────────────┘ │
+│         │                                                    │
+│  ┌──────▼──────────────────────────────────────────────────┐ │
+│  │               client/ layer                             │ │
+│  │  NerdGraphClient (httpx + tenacity retry)               │ │
+│  │  Read-only enforcement │ Batch queries                  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+                            │
+                     NerdGraph GraphQL API
+               US: https://api.newrelic.com/graphql
+               EU: https://api.eu.newrelic.com/graphql
 ```
+
+### Agent-Team Investigation Flow
+
+For comprehensive "investigate service X" requests, the AI assistant uses
+the agent-team pattern defined in `.github/agents/` and `.github/skills/`:
+
+```
+User: "investigate service X"
+  │
+  ▼
+sherlock-team-lead (orchestrator)
+  ├── connect_account (if needed)
+  ├── learn_account (discover entity names)
+  ├── Parse name: eswd-prod/sifi-adapter → bare=sifi-adapter, ns=eswd-prod
+  │
+  ├── PARALLEL DISPATCH ──────────────────────────────────────
+  │   ├── sherlock-apm ──────→ get_service_golden_signals, get_app_metrics, get_deployments
+  │   ├── sherlock-k8s ──────→ get_k8s_health, NRQL fallbacks
+  │   ├── sherlock-logs ─────→ search_logs, NRQL severity distribution
+  │   ├── sherlock-alerts ───→ get_service_incidents, get_incidents
+  │   ├── sherlock-synthetics → get_synthetic_monitors, investigate_synthetic
+  │   └── sherlock-infra ────→ get_service_dependencies, NRQL infrastructure
+  │
+  ▼
+sherlock-team-lead (synthesize ALL results)
+  │
+  ▼
+Unified Investigation Report (all 6 domains)
+```
+
+| Agent | Specialty | Primary Tools |
+|-------|-----------|---------------|
+| `sherlock-team-lead` | Orchestrator, synthesizer | `connect_account`, `learn_account`, `get_nrql_context` |
+| `sherlock-apm` | Golden signals, transactions, errors, deployments | `get_service_golden_signals`, `get_app_metrics`, `get_deployments` |
+| `sherlock-k8s` | Pods, containers, nodes, K8s events | `get_k8s_health`, `run_nrql_query` |
+| `sherlock-logs` | Error patterns, log volume, exception analysis | `search_logs`, `run_nrql_query` |
+| `sherlock-alerts` | Active incidents, alert policies, violations | `get_service_incidents`, `get_incidents`, `get_alerts` |
+| `sherlock-synthetics` | Monitor health, failure locations, availability | `get_synthetic_monitors`, `get_monitor_status`, `investigate_synthetic` |
+| `sherlock-infra` | Dependencies, host health, browser, messaging | `get_service_dependencies`, `run_nrql_query` |
 
 ### Layer Responsibilities
 
@@ -98,7 +139,7 @@ This MCP server exposes **21 tools** that let an AI assistant query your New Rel
 |-------|---------|
 | **main.py** | MCP server lifecycle, tool registration, audit logging, response scrubbing |
 | **tools/** | Individual tool implementations — each file owns one domain |
-| **core/** | Shared primitives — credentials, context, intelligence, cache, sanitization, deep links, data discovery, query building, dependency graph |
+| **core/** | Shared primitives — credentials, context, intelligence, cache, sanitization, deep links, utils, dependency graph |
 | **client/** | HTTP transport — NerdGraph client with retry, read-only enforcement, batching |
 
 ---
@@ -454,7 +495,7 @@ python scripts/cli.py
 
 | # | Tool | Description |
 |---|------|-------------|
-| 21 | `investigate_service` | **Three-phase adaptive investigation**: anchors the incident, discovers available data, then queries only discovered event types across APM, logs, K8s, synthetics, alerts, and dependencies — returns findings with deep links and fix recommendations |
+| 21 | `investigate_service` | **[LEGACY]** Quick automated check across all domains. For comprehensive investigation, use the agent-team pattern (sherlock-team-lead dispatching to all 6 domain agents) instead |
 
 ### Service Dependencies (1 tool — included in the 21 above)
 
@@ -474,15 +515,18 @@ User: "How is web-api performing?"
 → Returns: latency p50/p99, error rate, throughput, saturation with threshold alerts
 ```
 
-### Deep Investigation
+### Deep Investigation (Agent-Team)
 
 ```
 User: "Investigate the checkout service — it seems slow"
-→ Copilot calls: investigate_service("checkout-service")
-→ Phase 1: Anchors the incident (finds active alerts, determines time window)
-→ Phase 2: Discovers available data (checks which event types have data)
-→ Phase 3: Queries only discovered data in parallel across APM, logs, K8s, synthetics, alerts, dependencies
-→ Returns: unified report with findings, deep links, root cause hypothesis, and prioritized recommendations
+→ sherlock-team-lead dispatches ALL 6 domain agents in parallel:
+  → sherlock-apm: get_service_golden_signals, get_app_metrics, get_deployments
+  → sherlock-k8s: get_k8s_health with namespace + deployment resolution
+  → sherlock-logs: search_logs, NRQL severity distribution
+  → sherlock-alerts: get_service_incidents, get_incidents
+  → sherlock-synthetics: get_synthetic_monitors, get_monitor_status
+  → sherlock-infra: get_service_dependencies
+→ Team Lead synthesizes: unified report with findings, deep links, root cause, recommendations
 ```
 
 ### Service Dependency Mapping
@@ -718,7 +762,7 @@ User: "What is calling the auth service?"
 → Returns: list of upstream callers with health warnings for unhealthy dependencies
 ```
 
-The `investigate_service` tool also automatically includes dependency analysis in its findings.
+The `sherlock-infra` agent automatically includes dependency analysis in its investigation reports.
 
 ---
 
@@ -733,6 +777,24 @@ sherlock/
 ├── .env.example                # Environment variable template
 ├── .gitignore
 ├── main.py                     # MCP server entry point (21 tools)
+├── .github/
+│   ├── copilot-instructions.md # Agent-team rules, report format, anti-hallucination
+│   ├── agents/                 # 7 agent definitions
+│   │   ├── sherlock-team-lead.agent.md
+│   │   ├── sherlock-apm.agent.md
+│   │   ├── sherlock-k8s.agent.md
+│   │   ├── sherlock-logs.agent.md
+│   │   ├── sherlock-alerts.agent.md
+│   │   ├── sherlock-synthetics.agent.md
+│   │   └── sherlock-infra.agent.md
+│   └── skills/                 # 7 domain skill definitions
+│       ├── apm-analysis/SKILL.md
+│       ├── k8s-debug/SKILL.md
+│       ├── log-analysis/SKILL.md
+│       ├── alerts-analysis/SKILL.md
+│       ├── synthetic-debug/SKILL.md
+│       ├── infra-analysis/SKILL.md
+│       └── incident-triage/SKILL.md
 ├── core/
 │   ├── __init__.py
 │   ├── exceptions.py           # Custom exceptions
@@ -741,11 +803,12 @@ sherlock/
 │   ├── cache.py                # Two-layer caching (memory + disk)
 │   ├── context.py              # Thread-safe singleton context
 │   ├── intelligence.py         # Account discovery models + learn_account()
-│   ├── discovery.py            # Data discovery engine (checks what event types exist)
-│   ├── query_builder.py        # Dynamic NRQL query generation for investigation
+│   ├── utils.py                # Shared utilities (safe_extract_results, strip_null_timeseries)
 │   ├── deeplinks.py            # New Relic deep link URL builder
 │   ├── dependency_graph.py     # Dependency graph data model and persistence
-│   └── graph_builder.py        # 3-strategy dependency graph builder (spans, logs, naming)
+│   ├── graph_builder.py        # 3-strategy dependency graph builder (spans, logs, naming)
+│   ├── discovery.py            # [DEPRECATED] Data discovery engine
+│   └── query_builder.py        # [DEPRECATED] Dynamic NRQL query generation
 ├── client/
 │   ├── __init__.py
 │   └── newrelic.py             # NerdGraph HTTP client (read-only, retry, batch)
@@ -756,10 +819,10 @@ sherlock/
 │   ├── alerts.py               # Alert policies, incidents
 │   ├── apm.py                  # APM applications, metrics, deployments
 │   ├── logs.py                 # Log search
-│   ├── k8s.py                  # Kubernetes health
-│   ├── golden_signals.py       # Golden signals (latency, errors, traffic, saturation)
+│   ├── k8s.py                  # Kubernetes health (direct NRQL queries)
+│   ├── golden_signals.py       # Golden signals (direct NRQL queries)
 │   ├── synthetics.py           # Synthetic monitoring (status, results, investigation)
-│   ├── investigate.py          # Three-phase adaptive service investigation
+│   ├── investigate.py          # [LEGACY] Monolith investigation engine
 │   ├── intelligence_tools.py   # Connection, learning, profiles
 │   └── dependencies.py         # Service dependency mapping
 ├── scripts/
