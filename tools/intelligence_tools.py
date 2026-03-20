@@ -81,8 +81,8 @@ async def _build_graph_background(
 
 
 async def connect_account(
-    account_id: str,
-    api_key: str,
+    account_id: str | None = None,
+    api_key: str | None = None,
     region: str = "US",
     profile_name: str | None = None,
 ) -> str:
@@ -91,17 +91,44 @@ async def connect_account(
     Must be called before any other tool. Validates credentials,
     learns the account, caches intelligence, and sets the active context.
 
+    Provide EITHER a saved ``profile_name`` (which loads credentials from
+    the system keychain) OR explicit ``account_id`` + ``api_key``.
+
     Args:
-        account_id: New Relic account ID.
-        api_key: New Relic User API key.
+        account_id: New Relic account ID (optional when profile_name given).
+        api_key: New Relic User API key (optional when profile_name given).
         region: 'US' or 'EU'.
-        profile_name: Optional profile name to save for later reuse.
+        profile_name: Saved profile name to load credentials from keychain.
 
     Returns:
         JSON string with connection status and account summary.
     """
     start = time.time()
     try:
+        # Resolve credentials from saved profile when explicit creds not given.
+        if profile_name and (not account_id or not api_key):
+            try:
+                loaded = _credential_manager.load_profile(profile_name)
+                account_id = loaded.account_id
+                api_key = loaded.api_key
+                region = loaded.region
+                # Don't re-save the profile later since it already exists.
+                profile_name = None
+            except Exception as exc:
+                return json.dumps({
+                    "error": f"Failed to load profile '{profile_name}': {exc}",
+                    "tool": "connect_account",
+                    "hint": "Check that the profile exists and keychain is accessible.",
+                    "data_available": False,
+                })
+
+        if not account_id or not api_key:
+            return json.dumps({
+                "error": "Provide either profile_name or both account_id and api_key.",
+                "tool": "connect_account",
+                "data_available": False,
+            })
+
         credentials = Credentials(
             account_id=account_id,
             api_key=api_key,

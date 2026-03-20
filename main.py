@@ -116,7 +116,8 @@ TOOLS: list[Tool] = [
         description=(
             "Connect to a New Relic account. Call this first — required before "
             "all other tools. Validates credentials, learns the account structure, "
-            "and caches intelligence."
+            "and caches intelligence. Provide EITHER a saved profile_name (which "
+            "loads credentials from keychain) OR explicit account_id + api_key."
         ),
         inputSchema={
             "type": "object",
@@ -129,10 +130,13 @@ TOOLS: list[Tool] = [
                 },
                 "profile_name": {
                     "type": "string",
-                    "description": "Optional profile name to save for later reuse",
+                    "description": (
+                        "Saved profile name to connect from (loads credentials "
+                        "from keychain). When provided, account_id and api_key "
+                        "are not required."
+                    ),
                 },
             },
-            "required": ["account_id", "api_key"],
         },
     ),
     # 2. list_profiles

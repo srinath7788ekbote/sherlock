@@ -207,6 +207,100 @@ Infra Agent ── [scope: dependencies, host health]
 7. **Flag conflicts** — if two domains give contradicting signals, highlight it
 8. **Keep it short** — the report should fit on one screen for healthy services
 
+### Causal Chain Detection (MANDATORY)
+
+Before writing the final report, the Team Lead MUST check for these known
+cascade failure patterns by cross-referencing findings from all 6 agents.
+When a pattern is matched, state the causal chain EXPLICITLY in the root cause summary.
+
+#### Pattern 1 — DB Cascade (most common in this environment)
+
+**Trigger:** Logs agent reports DB connection errors (pg_hba.conf, JDBC, connection refused)
+AND K8s agent reports pods going not-ready in the same time window
+
+**Causal Chain to state:**
+> "🔴 DB CASCADE: {db_error} caused application health checks to fail.
+> K8s readiness probes detected unhealthy state and removed {N} pods from the load balancer.
+> This caused 503 errors — K8s returning no-ready-endpoints, not an application bug.
+> **Fix the DB first — K8s and app errors are symptoms, not causes.**"
+
+**NRQL to confirm timing correlation:**
+```sql
+-- Confirm DB errors and pod not-ready happened in same window
+SELECT count(*) FROM Log
+WHERE message LIKE '%pg_hba%' OR message LIKE '%JDBC%' OR message LIKE '%connection refused%'
+TIMESERIES 1 minute SINCE {since_minutes} minutes ago
+```
+Compare this timeseries with K8s `isReady=0` timestamps. If they overlap within
+5 minutes → DB CASCADE confirmed.
+
+#### Pattern 2 — Shared Infrastructure Blast
+
+**Trigger:** 3+ services show error spikes in the same 30-minute window
+
+**Causal Chain to state:**
+> "🔴 SHARED INFRA FAILURE: {N} services degraded simultaneously at {time}.
+> Individual service issues are secondary — investigate shared infrastructure
+> (database, message broker, network segment, or DNS) first."
+
+**NRQL to identify:**
+```sql
+SELECT uniqueCount(appName) as affected_services, count(*) as errors
+FROM TransactionError
+WHERE timestamp > {spike_start}
+TIMESERIES 5 minutes SINCE {since_minutes} minutes ago
+```
+
+#### Pattern 3 — Deploy Regression
+
+**Trigger:** APM agent reports error spike AND get_deployments shows a deploy
+within 30 minutes before the spike start
+
+**Causal Chain to state:**
+> "🟡 DEPLOY REGRESSION: Error spike at {time} follows deployment at {deploy_time}
+> ({N} minutes before spike). Rollback {version} to restore baseline."
+
+#### Pattern 4 — Chronic Issue (NOT an incident, a systemic problem)
+
+**Trigger:** Alerts agent reports >5 incidents in the last 7 days for the same condition
+
+**Statement to add at TOP of report (before Domain Status):**
+> "🔴 CHRONIC ISSUE: This service has had {N} incidents in the last 7 days,
+> all triggered by: '{condition_name}'.
+> Incident response alone will not fix this. A permanent fix is required.
+> Recommendations section prioritises the systemic fix."
+
+**This MUST appear above the Domain Status table, not buried in findings.**
+
+#### How to Correlate
+
+After collecting all 6 agent results:
+1. Extract timestamps of all error spikes, pod restarts, and incidents
+2. Sort them chronologically
+3. Check for any patterns above
+4. If a pattern matches, prepend the causal chain statement to the findings section
+5. In Recommendations, put the root cause fix as item #1 — not the symptoms
+
+The causal chain statement is the most valuable sentence in the report.
+An engineer reading it during a 2am incident should immediately know what to fix.
+
+### Chronic Issue Banner Rule
+
+If ANY domain agent returns a `CHRONIC_FLAG` in their findings:
+
+1. Add this block ABOVE the Domain Status table (the very first thing in the report):
+
+```markdown
+> 🔴 **CHRONIC ISSUE DETECTED**
+> {service_name} has experienced **{N} incidents in 7 days**, all triggered by
+> the same condition: *"{condition_name}"*.
+> **Incident response will not fix this.** A permanent engineering fix is required.
+> See Recommendation #1 below.
+```
+
+2. In Recommendations, make the systemic fix item #1 with priority CRITICAL.
+3. Add an estimated recurrence: "At current rate, next incident expected in ~{N} hours."
+
 ## ⛔ DEEP LINK RULE — MANDATORY
 
 Sherlock MCP tools return `deep_link` and `links` fields in their JSON responses.

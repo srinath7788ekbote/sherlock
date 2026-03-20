@@ -106,6 +106,21 @@ For every investigation, the Team Lead MUST determine:
 Use `sherlock-infra`'s dependency map to make this determination.
 **NEVER conclude root cause without checking both upstream and downstream health.**
 
+### Causal Chain Rule (MANDATORY)
+
+When the Team Lead identifies an origin service or infrastructure component,
+it MUST explicitly state the full causal chain in plain English:
+
+**Format:**
+> "{ROOT_CAUSE} → {INTERMEDIATE_EFFECT} → {USER_FACING_SYMPTOM}"
+
+**Examples from real incidents:**
+> "PostgreSQL availability=0 → health checks fail → pods not-ready → 503s to clients"
+> "Deploy at 14:20 UTC → error rate spike at 14:23 UTC → 5 DLQ'd messages"
+> "Redis timeout → cache miss → DB overload → P95 latency spike"
+
+**Never just list symptoms.** Always trace from cause to effect.
+
 ---
 
 ## 2. MCP Tool Reference
@@ -330,3 +345,42 @@ comprehensive SRE investigation:
 | Secret chain (KV → K8s → Pod) | HiveMind |
 | Alert conditions and incidents | Sherlock (Alerts) |
 | Synthetic monitor health | Sherlock (Synthetics) |
+
+---
+
+## 8. Azure Cloud Integration
+
+When investigating services that use Azure managed infrastructure, the infra agent
+MUST check Azure-specific event types in addition to standard NR agent data.
+
+### Azure Event Types in New Relic
+
+| Service | Event Type | Key Signals |
+|---------|-----------|-------------|
+| PostgreSQL Flexible Server | `AzurePostgreSqlFlexibleServerSample` | availability, connectionsFailed, cpuPercent |
+| Service Bus | `AzureServiceBusSample` | deadLetteredMessages, activeMessages |
+| Redis Cache | `AzureRedisCacheSample` | cacheHitsPerSecond, usedMemoryPercentage |
+| Key Vault | `AzureKeyVaultSample` | serviceApiResult errors |
+| AKS | `AzureContainerServiceSample` | nodeCount, podCount |
+
+### Cascade Failure Pattern
+
+When `AzurePostgreSqlFlexibleServerSample` shows `availability = 0`:
+
+1. **Root cause identified at DB layer** — stop looking elsewhere for the origin
+2. **Expected cascade:** DB down → app health checks fail → K8s pods go not-ready → 503s
+3. **Expected ASB impact:** Services receiving queue messages cannot process them
+   (DB required for writes) → messages exhaust retries → dead-lettered
+4. **Blast radius:** Check how many services share this DB instance using NRQL:
+   ```sql
+   SELECT uniqueCount(entity.name) FROM Log
+   WHERE message LIKE '%pg_hba%' OR message LIKE '%JDBC%'
+   SINCE 60 minutes ago FACET entity.name
+   ```
+
+### NO_DATA Handling
+
+If `AzurePostgreSqlFlexibleServerSample` returns no rows:
+- Azure integration may not be configured — report `⚪ Azure integration: not configured`
+- Do NOT fail the investigation — continue with other steps
+- Do NOT invent Azure metrics if the query returns empty
