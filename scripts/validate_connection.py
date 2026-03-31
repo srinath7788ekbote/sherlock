@@ -3,9 +3,9 @@ Credential validation script for Sherlock.
 
 Run this before first use to verify your New Relic API key works.
 Usage:
-    python scripts/test_connection.py
-    python scripts/test_connection.py --account-id 123456 --api-key NRAK-xxx
-    python scripts/test_connection.py --account-id 123456 --api-key NRAK-xxx --region EU
+    python scripts/validate_connection.py
+    python scripts/validate_connection.py --account-id 123456 --api-key NRAK-xxx
+    python scripts/validate_connection.py --account-id 123456 --api-key NRAK-xxx --region EU
 """
 
 import argparse

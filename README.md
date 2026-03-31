@@ -826,7 +826,7 @@ sherlock/
 │   ├── intelligence_tools.py   # Connection, learning, profiles
 │   └── dependencies.py         # Service dependency mapping
 ├── scripts/
-│   ├── test_connection.py      # Interactive connection validator
+│   ├── validate_connection.py   # Interactive connection validator
 │   └── cli.py                  # Interactive CLI for all 21 tools
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
