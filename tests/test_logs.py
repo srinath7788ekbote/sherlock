@@ -18,8 +18,10 @@ def _mock_nrql_response(results):
     return {
         "data": {
             "actor": {
-                "nrql": {
-                    "results": results
+                "account": {
+                    "nrql": {
+                        "results": results
+                    }
                 }
             }
         }
@@ -60,7 +62,8 @@ class TestSearchLogs:
 
         result = await search_logs("web-api")
         parsed = json.loads(result)
-        assert "logs" in parsed or "results" in parsed or isinstance(parsed, list)
+        assert "logs" in parsed
+        assert parsed["total_logs"] == 2
 
     @respx.mock
     @pytest.mark.asyncio
@@ -177,3 +180,57 @@ class TestSearchLogs:
         # "web-ap" should fuzzy-resolve to "web-api"
         result = await search_logs("web-ap")
         assert isinstance(result, str)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_entity_name_fallback(self, logs_context):
+        """Falls back to entity.name when primary service attribute has no data."""
+        empty = _mock_nrql_response([])
+        entity_logs = _mock_nrql_response([
+            {"message": "Found via entity.name", "entity.name": "web-api", "level": "ERROR"},
+        ])
+
+        call_count = 0
+
+        def _side_effect(request, route):
+            nonlocal call_count
+            call_count += 1
+            body = json.loads(request.content)
+            query = body.get("query", "")
+            # First call is primary attr (service.name) — no results.
+            # Subsequent calls try fallback attrs — return data when
+            # the query contains entity.name.
+            if "`entity.name`" in query:
+                return httpx.Response(200, json=entity_logs)
+            return httpx.Response(200, json=empty)
+
+        respx.post("https://api.newrelic.com/graphql").mock(side_effect=_side_effect)
+
+        result = await search_logs("web-api", severity="ERROR")
+        parsed = json.loads(result)
+        assert parsed["total_logs"] == 1
+        assert "entity.name" in parsed.get("note", "")
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_bare_name_fallback_for_namespaced_service(self, logs_context):
+        """Falls back to bare name when full namespace/service returns no logs."""
+        empty = _mock_nrql_response([])
+        bare_logs = _mock_nrql_response([
+            {"message": "Found via bare name", "service.name": "client-service", "level": "INFO"},
+        ])
+
+        def _side_effect(request, route):
+            body = json.loads(request.content)
+            query = body.get("query", "")
+            # Only return data when the query uses the bare name without
+            # the namespace prefix.
+            if "client-service" in query and "eswd-prod" not in query:
+                return httpx.Response(200, json=bare_logs)
+            return httpx.Response(200, json=empty)
+
+        respx.post("https://api.newrelic.com/graphql").mock(side_effect=_side_effect)
+
+        result = await search_logs("eswd-prod/client-service")
+        parsed = json.loads(result)
+        assert parsed["total_logs"] == 1

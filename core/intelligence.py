@@ -378,8 +378,8 @@ NRQL_TEMPLATE = """
 # ── Service attribute heuristics ─────────────────────────────────────────
 
 SERVICE_ATTR_CANDIDATES = [
-    "service.name", "serviceName", "service", "app.name",
-    "application", "appName", "entity.name",
+    "service.name", "entity.name", "serviceName", "service",
+    "app.name", "application", "appName",
 ]
 
 SEVERITY_ATTR_CANDIDATES = [

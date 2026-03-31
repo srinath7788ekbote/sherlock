@@ -134,6 +134,10 @@ async def search_logs(
             for alt_attr in _SERVICE_ATTR_FALLBACKS:
                 if alt_attr == svc_attr:
                     continue
+                logger.debug(
+                    "Primary attr '%s' returned no logs; trying fallback attr '%s'",
+                    svc_attr, alt_attr,
+                )
                 alt_nrql = NRQL_LOG_BASE % (alt_attr, sev_attr)
                 alt_nrql += " AND `%s` LIKE '%%%s%%'" % (alt_attr, resolved_name)
                 if severity:
@@ -163,8 +167,71 @@ async def search_logs(
                         nrql = alt_nrql
                         svc_attr = alt_attr
                         used_fallback_attr = alt_attr
+                        logger.info(
+                            "Fallback attr '%s' found %d logs for '%s'",
+                            alt_attr, len(alt_logs), resolved_name,
+                        )
                         break
-                except Exception:
+                except Exception as fb_exc:
+                    logger.warning(
+                        "Fallback attr '%s' failed for '%s': %s",
+                        alt_attr, resolved_name, fb_exc,
+                    )
+                    continue
+
+        # If all attribute fallbacks failed and the name contains a namespace
+        # separator (e.g. "eswd-prod/client-service"), retry with just the
+        # bare service name ("client-service").  Log attributes may store
+        # only the bare name while entity.name uses the full namespaced form.
+        if not logs and resolved_name and "/" in resolved_name:
+            bare_name = resolved_name.rsplit("/", 1)[1]
+            logger.debug(
+                "Full name '%s' returned no logs; retrying with bare name '%s'",
+                resolved_name, bare_name,
+            )
+            all_attrs = [svc_attr] + [
+                a for a in _SERVICE_ATTR_FALLBACKS if a != svc_attr
+            ]
+            for alt_attr in all_attrs:
+                alt_nrql = NRQL_LOG_BASE % (alt_attr, sev_attr)
+                alt_nrql += " AND `%s` LIKE '%%%s%%'" % (alt_attr, bare_name)
+                if severity:
+                    safe_severity = sanitize_nrql_string(severity)
+                    levels = [f"'{s.strip()}'" for s in safe_severity.split(",")]
+                    alt_nrql += NRQL_LOG_SEVERITY_FILTER % (sev_attr, ", ".join(levels))
+                if keyword:
+                    safe_keyword = sanitize_nrql_string(keyword)
+                    alt_nrql += NRQL_LOG_KEYWORD_FILTER % safe_keyword
+                alt_nrql += NRQL_LOG_SINCE % since_minutes
+                alt_nrql += NRQL_LOG_ORDER
+                alt_nrql += NRQL_LOG_LIMIT % min(limit, 500)
+
+                escaped_alt = alt_nrql.replace('"', '\\"')
+                alt_query = GQL_NRQL_QUERY % (credentials.account_id, escaped_alt)
+                try:
+                    alt_result = await client.query(alt_query)
+                    alt_logs = (
+                        alt_result.get("data", {})
+                        .get("actor", {})
+                        .get("account", {})
+                        .get("nrql", {})
+                        .get("results", [])
+                    )
+                    if alt_logs:
+                        logs = alt_logs
+                        nrql = alt_nrql
+                        svc_attr = alt_attr
+                        used_fallback_attr = alt_attr
+                        logger.info(
+                            "Bare name fallback '%s' on attr '%s' found %d logs",
+                            bare_name, alt_attr, len(alt_logs),
+                        )
+                        break
+                except Exception as fb_exc:
+                    logger.warning(
+                        "Bare name fallback attr '%s' failed for '%s': %s",
+                        alt_attr, bare_name, fb_exc,
+                    )
                     continue
 
         duration_ms = int((time.time() - start) * 1000)
