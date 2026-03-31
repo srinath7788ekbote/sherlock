@@ -18,8 +18,10 @@ def _mock_nrql_response(results):
     return {
         "data": {
             "actor": {
-                "nrql": {
-                    "results": results
+                "account": {
+                    "nrql": {
+                        "results": results
+                    }
                 }
             }
         }

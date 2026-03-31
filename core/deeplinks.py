@@ -69,7 +69,7 @@ class DeepLinkBuilder:
             pane_b64 = base64.b64encode(pane.encode()).decode()
             return (
                 f"{self._base}/launcher/data-exploration.query-builder"
-                f"?pane={pane_b64}"
+                f"?pane={urllib.parse.quote(pane_b64, safe='')}"
                 f"&platform[accountId]={self._account_id}"
             )
         except Exception:
@@ -131,7 +131,7 @@ class DeepLinkBuilder:
             if error_only:
                 payload = json.dumps({"error": True}, separators=(",", ":"))
                 b64 = base64.b64encode(payload.encode()).decode()
-                url += f"&filters={b64}"
+                url += f"&filters={urllib.parse.quote(b64, safe='')}"
             return url
         except Exception:
             return None
@@ -162,7 +162,7 @@ class DeepLinkBuilder:
             pane_b64 = base64.b64encode(pane.encode()).decode()
             return (
                 f"{self._base}/launcher/logger.log-tailer"
-                f"?pane={pane_b64}"
+                f"?pane={urllib.parse.quote(pane_b64, safe='')}"
                 f"&platform[accountId]={self._account_id}"
             )
         except Exception:

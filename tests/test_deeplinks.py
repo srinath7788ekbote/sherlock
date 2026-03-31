@@ -97,6 +97,26 @@ class TestNrqlChart:
         pane_json = json.loads(base64.b64decode(params["pane"][0]))
         assert pane_json["nerdletId"] == "data-exploration.query-builder"
 
+    def test_nrql_chart_pane_is_url_encoded(self, builder_us):
+        """Pane value must be percent-encoded so +, /, = don't break URLs."""
+        nrql = "SELECT count(*) FROM Transaction WHERE appName = 'eswd-prod/sifi-adapter' AND `http.statusCode` >= 500 SINCE 3 hours ago FACET request.uri TIMESERIES 10 minutes"
+        url = builder_us.nrql_chart(nrql, 180)
+        assert url is not None
+        # Extract raw pane value from URL (before parse_qs decodes it)
+        raw_query = urllib.parse.urlparse(url).query
+        for part in raw_query.split("&"):
+            if part.startswith("pane="):
+                raw_pane = part[len("pane="):]
+                # Must not contain raw base64 chars that are URL-unsafe
+                assert "+" not in raw_pane, "Raw '+' in pane value"
+                assert "/" not in raw_pane, "Raw '/' in pane value"
+                break
+        # Round-trip: parse_qs → b64decode → JSON still works
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_json = json.loads(base64.b64decode(params["pane"][0]))
+        assert pane_json["initialNrqlValue"] == nrql
+
 
 # ── Entity link tests ────────────────────────────────────────────────────
 
