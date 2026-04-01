@@ -93,6 +93,19 @@ Unified Investigation Report (all 6 domains)
 - **Maximum 3 parallel agent teams** for multi-service investigations
 - **Agent timeout**: 60 seconds per agent — report what you have
 
+### Thinking Effort Guidance (VS Code 1.113+)
+
+VS Code 1.113 allows setting model reasoning level per prompt from the UI.
+Recommended settings for Sherlock workflows:
+
+| Task | Thinking Effort | Why |
+|------|----------------|-----|
+| Full investigation (investigate service X) | HIGH | 6 agents, causal chain, synthesis |
+| Quick health check (how is X performing?) | LOW | Single tool call, no synthesis needed |
+| Azure cascade incident | HIGH | Multi-domain correlation required |
+| get_service_golden_signals only | LOW | Single domain, fast answer |
+| Chronic issue analysis | HIGH | 7-day pattern + causal chain |
+
 ### Origin vs Victim Determination (MANDATORY)
 
 For every investigation, the Team Lead MUST determine:
@@ -188,6 +201,23 @@ this, agents may use wrong names in their queries.
 | "What depends on X?" | Targeted: Infra agent | `get_service_dependencies` |
 | "Run NRQL" | Direct | `get_nrql_context` first, then `run_nrql_query` |
 | "Quick summary of X" | `investigate_service` (single tool) | Quick check only |
+
+### CLI Agent Usage (VS Code 1.113+)
+
+Sherlock MCP now works inside VS Code CLI agents, not just Copilot Chat.
+
+**To invoke Sherlock from CLI agent:**
+```bash
+# In VS Code terminal with CLI agent enabled
+@sherlock investigate eswd-prod/client-service
+@sherlock get_service_golden_signals eswd-prod/sifi-adapter since_minutes=60
+```
+
+**CLI agent rules:**
+- connect_account MUST still be called first — CLI agents do not inherit
+  Copilot Chat session context
+- All 21 tools are available identically in CLI and Chat agents
+- Use `--debug` flag in CLI agent to view Sherlock MCP server logs inline
 
 ---
 

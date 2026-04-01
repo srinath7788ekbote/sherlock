@@ -301,6 +301,22 @@ If ANY domain agent returns a `CHRONIC_FLAG` in their findings:
 2. In Recommendations, make the systemic fix item #1 with priority CRITICAL.
 3. Add an estimated recurrence: "At current rate, next incident expected in ~{N} hours."
 
+### Nested Subagent Chains (VS Code 1.113+)
+
+VS Code 1.113 supports subagents invoking other subagents. Sherlock can now support
+deeper investigation chains without manual follow-up prompts.
+
+**When to use nested chains:**
+- sherlock-infra finds a failing upstream service → automatically trigger
+  sherlock-apm on THAT upstream service without the engineer asking
+- sherlock-alerts finds a CHRONIC_FLAG → automatically trigger sherlock-logs
+  for the same service to extract the recurring error pattern
+- sherlock-k8s finds OOMKills on multiple pods → automatically trigger
+  sherlock-infra to check if a shared DB or Redis is the cause
+
+**Rule:** Nested chains are capped at 2 hops (agent → subagent → report back).
+Never chain more than 2 levels deep. Always report nested findings back to Team Lead.
+
 ## ⛔ DEEP LINK RULE — MANDATORY
 
 Sherlock MCP tools return `deep_link` and `links` fields in their JSON responses.

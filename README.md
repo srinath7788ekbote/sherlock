@@ -151,8 +151,7 @@ Unified Investigation Report (all 6 domains)
 | Python | 3.11+ |
 | pip | 23.0+ |
 | New Relic User API Key | `NRAK-...` format |
-| OS Keychain | macOS Keychain / Windows Credential Locker / Linux Secret Service |
-
+| OS Keychain | macOS Keychain / Windows Credential Locker / Linux Secret Service || VS Code | 1.113+ recommended (required for nested subagents and CLI MCP support) |
 ---
 
 ## Installation
@@ -280,6 +279,9 @@ After setup, add the Sherlock MCP server to your AI client's configuration.
   }
 }
 ```
+
+> **VS Code 1.113+:** Sherlock supports nested subagent chains, configurable thinking
+> effort per investigation, and CLI agent invocation. Update VS Code to get these capabilities.
 
 **Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json`:
 
