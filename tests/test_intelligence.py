@@ -24,6 +24,9 @@ from core.intelligence import (
     WorkloadIntelligence,
     EntityCountsSummary,
     AccountMeta,
+    CrossAccountEntity,
+    decode_entity_guid,
+    detect_cross_account_entities,
     learn_account,
 )
 
@@ -211,3 +214,63 @@ class TestLearnAccount:
 
         intel = await learn_account(mock_credentials)
         assert "survivor-app" in intel.apm.service_names
+
+
+class TestDecodeEntityGuid:
+    """Tests for GUID decoding and cross-account entity detection."""
+
+    def test_decode_known_guid(self):
+        """Decode a real entity GUID and verify account ID extraction."""
+        result = decode_entity_guid(
+            "MzUwMzQzNXxFWFR8U0VSVklDRXwtODM2MjU1ODk1Njg0NTQ4NTQ1"
+        )
+        assert result["account_id"] == "3503435"
+        assert result["entity_type"] == "EXT"
+        assert result["domain"] == "SERVICE"
+
+    def test_decode_apm_guid(self):
+        """Decode a standard APM GUID correctly."""
+        # MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx decodes to 123456|APM|APPLICATION|1
+        result = decode_entity_guid("MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx")
+        assert result["account_id"] == "123456"
+        assert result["entity_type"] == "APM"
+        assert result["domain"] == "APPLICATION"
+
+    def test_decode_invalid_guid_returns_empty(self):
+        """Invalid GUID returns empty dict."""
+        assert decode_entity_guid("not-a-valid-guid!!!") == {}
+        assert decode_entity_guid("") == {}
+
+    def test_detect_cross_account_entities(self):
+        """detect_cross_account_entities finds entities in other accounts."""
+        intel = AccountIntelligence(
+            account_id="123456",
+            apm=APMIntelligence(
+                service_names=["local-svc", "remote-svc"],
+                service_guids={
+                    # This GUID decodes to account 123456 (same account)
+                    "local-svc": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx",
+                    # This GUID decodes to account 3503435 (different account)
+                    "remote-svc": "MzUwMzQzNXxFWFR8U0VSVklDRXwtODM2MjU1ODk1Njg0NTQ4NTQ1",
+                },
+            ),
+        )
+        cross = detect_cross_account_entities(intel)
+        assert len(cross) == 1
+        assert cross[0].name == "remote-svc"
+        assert cross[0].home_account_id == "3503435"
+        assert cross[0].connected_account_id == "123456"
+
+    def test_no_cross_account_when_all_same(self):
+        """No cross-account entities when all GUIDs match connected account."""
+        intel = AccountIntelligence(
+            account_id="123456",
+            apm=APMIntelligence(
+                service_names=["svc-a"],
+                service_guids={
+                    "svc-a": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx",
+                },
+            ),
+        )
+        cross = detect_cross_account_entities(intel)
+        assert len(cross) == 0

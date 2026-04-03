@@ -200,7 +200,7 @@ async def connect_account(
         }
 
         duration_ms = int((time.time() - start) * 1000)
-        return json.dumps({
+        result = {
             "status": "connected",
             "account_id": account_id,
             "account_name": validation["account_name"],
@@ -228,7 +228,27 @@ async def connect_account(
             },
             "dependency_graph": dep_graph_status,
             "duration_ms": duration_ms,
-        })
+        }
+
+        # Cross-account entity warning
+        if intelligence.cross_account_entities:
+            result["cross_account_warning"] = (
+                "⚠️  CROSS-ACCOUNT ENTITIES DETECTED\n"
+                "The following services exist in a DIFFERENT New Relic account "
+                "than the one you're connected to.\n"
+                "Sherlock cannot query their telemetry until you connect to "
+                "that account."
+            )
+            result["cross_account_entities"] = [
+                {
+                    "name": e.name,
+                    "type": e.entity_type,
+                    "home_account_id": e.home_account_id,
+                }
+                for e in intelligence.cross_account_entities
+            ]
+
+        return json.dumps(result)
 
     except Exception as exc:
         return json.dumps({
@@ -258,7 +278,8 @@ async def learn_account_tool() -> str:
         ctx.set_active(credentials, intelligence)
 
         duration_ms = int((time.time() - start) * 1000)
-        return json.dumps({
+
+        result = {
             "status": "refreshed",
             "account_id": credentials.account_id,
             "total_entities": intelligence.entity_counts.total_entities,
@@ -275,7 +296,35 @@ async def learn_account_tool() -> str:
             "workloads": intelligence.workloads.workload_count,
             "logs_enabled": intelligence.logs.enabled,
             "duration_ms": duration_ms,
-        })
+        }
+
+        # Cross-account entity warning
+        if intelligence.cross_account_entities:
+            result["cross_account_warning"] = (
+                "⚠️  CROSS-ACCOUNT ENTITIES DETECTED\n"
+                "The following services exist in a DIFFERENT New Relic account "
+                "than the one you're connected to.\n"
+                "Sherlock cannot query their telemetry until you connect to "
+                "that account.\n"
+            )
+            result["cross_account_entities"] = [
+                {
+                    "name": e.name,
+                    "type": e.entity_type,
+                    "home_account_id": e.home_account_id,
+                    "connected_account_id": e.connected_account_id,
+                }
+                for e in intelligence.cross_account_entities
+            ]
+            result["cross_account_hint"] = (
+                "To investigate these services, run: "
+                "connect_account(account_id=\"<home_account_id>\", api_key=\"...\") "
+                "or connect_account(profile_name=\"<profile for that account>\")\n"
+                "These services will NOT appear in NRQL queries against the "
+                "current account."
+            )
+
+        return json.dumps(result)
 
     except Exception as exc:
         return json.dumps({

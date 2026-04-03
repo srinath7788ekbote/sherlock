@@ -414,3 +414,25 @@ If `AzurePostgreSqlFlexibleServerSample` returns no rows:
 - Azure integration may not be configured — report `⚪ Azure integration: not configured`
 - Do NOT fail the investigation — continue with other steps
 - Do NOT invent Azure metrics if the query returns empty
+
+---
+
+## 9. Cross-Account Entity Resolution
+
+New Relic entity GUIDs encode the account ID. When a service entity has a GUID
+whose decoded account ID does not match the connected account, ALL queries against
+that service will return zero results — silently.
+
+**Rule:** After every learn_account call, check for cross-account entities.
+If the investigated service name matches a cross-account entity:
+
+1. Do NOT proceed with investigation in the wrong account
+2. Notify the engineer immediately with the home account ID
+3. List available Sherlock profiles that might connect to that account
+4. Wait for confirmation before switching accounts
+
+**GUID decode:** base64-decode the GUID → split on `|` → first segment = account ID.
+
+OTel services (`EXT|SERVICE` entity type) are the most common cross-account entities.
+They are instrumented separately from APM services and often report to a dedicated
+observability account.

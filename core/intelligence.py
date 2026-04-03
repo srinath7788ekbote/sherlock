@@ -8,6 +8,7 @@ any client's actual data with zero manual configuration.
 """
 
 import asyncio
+import base64
 import logging
 import re
 from datetime import datetime, timezone
@@ -501,6 +502,16 @@ class WorkloadIntelligence(BaseModel):
     workload_count: int = 0
 
 
+class CrossAccountEntity(BaseModel):
+    """An entity whose GUID encodes a different account than the connected one."""
+
+    name: str = ""
+    guid: str = ""
+    entity_type: str = ""  # APM, EXT, INFRA, SYNTH, etc.
+    home_account_id: str = ""  # account the entity actually lives in
+    connected_account_id: str = ""  # account we're connected to
+
+
 class EntityTypeSummary(BaseModel):
     """A single entity type with its domain, type, and count."""
 
@@ -597,6 +608,7 @@ class AccountIntelligence(BaseModel):
     entity_counts: EntityCountsSummary = Field(default_factory=EntityCountsSummary)
     account_meta: AccountMeta = Field(default_factory=AccountMeta)
     naming_convention: NamingConvention = Field(default_factory=NamingConvention)
+    cross_account_entities: list[CrossAccountEntity] = Field(default_factory=list)
 
 
 class AccessibleAccount(BaseModel):
@@ -670,6 +682,88 @@ async def discover_accounts(credentials: Credentials) -> list[AccessibleAccount]
 
 
 # ── Helper functions ─────────────────────────────────────────────────────
+
+
+def decode_entity_guid(guid: str) -> dict:
+    """Decode a New Relic entity GUID to its components.
+
+    Entity GUIDs are base64-encoded strings in the format:
+    ``account_id|entity_type|domain|entity_id``
+
+    Args:
+        guid: The base64-encoded entity GUID.
+
+    Returns:
+        Dict with ``account_id``, ``entity_type``, and ``domain`` keys,
+        or empty dict if decoding fails.
+    """
+    try:
+        padded = guid + "=" * (-len(guid) % 4)
+        decoded = base64.b64decode(padded.encode()).decode("utf-8")
+        parts = decoded.split("|")
+        if len(parts) >= 3:
+            return {
+                "account_id": parts[0],
+                "entity_type": parts[1],
+                "domain": parts[2],
+            }
+    except Exception:
+        pass
+    return {}
+
+
+def detect_cross_account_entities(
+    intelligence: "AccountIntelligence",
+) -> list[CrossAccountEntity]:
+    """Scan all discovered entity GUIDs for cross-account references.
+
+    Compares the account ID encoded in each entity GUID against the
+    connected account ID. Any mismatch indicates the entity lives in a
+    different New Relic account.
+
+    Args:
+        intelligence: The learned AccountIntelligence to scan.
+
+    Returns:
+        List of CrossAccountEntity objects for mismatched entities.
+    """
+    connected_id = intelligence.account_id
+    cross: list[CrossAccountEntity] = []
+
+    # Collect all (name, guid) pairs from every domain.
+    guid_pairs: list[tuple[str, str, str]] = []  # (name, guid, source_type)
+
+    for name, guid in intelligence.apm.service_guids.items():
+        guid_pairs.append((name, guid, "APM"))
+
+    for name in intelligence.otel.service_names:
+        # OTel entities may not have GUIDs stored in a separate map,
+        # but they appear in entity search results. Check via name match
+        # against APM guids or deduce from the entity search data.
+        pass
+
+    for name, meta in intelligence.synthetics.monitor_map.items():
+        if meta.guid:
+            guid_pairs.append((name, meta.guid, "SYNTH"))
+
+    for name, guid, source_type in guid_pairs:
+        decoded = decode_entity_guid(guid)
+        if not decoded:
+            continue
+        home_account = decoded.get("account_id", "")
+        if home_account and home_account != connected_id:
+            entity_type = decoded.get("entity_type", "UNKNOWN")
+            domain = decoded.get("domain", "")
+            cross.append(CrossAccountEntity(
+                name=name,
+                guid=guid,
+                entity_type=f"{entity_type}|{domain}" if domain else entity_type,
+                home_account_id=home_account,
+                connected_account_id=connected_id,
+            ))
+
+    return cross
+
 
 def _infer_naming_pattern(names: list[str]) -> str:
     """Infer a naming convention pattern from a list of names.
@@ -1757,5 +1851,20 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
         intel.workloads.workload_count,
         intel.logs.enabled,
     )
+
+    # ── Cross-Account Entity Detection ──
+    try:
+        intel.cross_account_entities = detect_cross_account_entities(intel)
+        if intel.cross_account_entities:
+            logger.warning(
+                "Cross-account entities detected in account %s: %s",
+                account_id,
+                [
+                    f"{e.name} (home={e.home_account_id})"
+                    for e in intel.cross_account_entities
+                ],
+            )
+    except Exception as xacc_exc:
+        logger.warning("Cross-account detection failed: %s", xacc_exc)
 
     return intel

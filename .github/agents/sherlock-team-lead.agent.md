@@ -120,6 +120,24 @@ STEP 0.4: mcp_sherlock_get_nrql_context(domain="all")
 
 **NEVER skip Steps 0.1-0.3. Step 0.4 is recommended but can be skipped for speed.**
 
+### Step 0c — Cross-Account Entity Check (MANDATORY)
+
+After learn_account, check if any services involved in the investigation
+live in a different New Relic account:
+
+1. Check `cross_account_entities` from the learn_account / connect_account response
+2. If any entity matching the investigated service name lives in a different account:
+   → **STOP parallel dispatch**
+   → Inform engineer: "⚠️ {service_name} is an OTel/EXT service that lives in
+     account {home_account_id}, not the currently connected account {current_account}.
+     Sherlock cannot see its APM, logs, or spans from here.
+     Connect to account {home_account_id} first:
+     `connect_account(profile_name='<profile_name>')` or
+     `connect_account(account_id='{home_account_id}')`"
+   → List any Sherlock profiles that might match (from list_profiles output)
+3. If engineer confirms a profile, connect to it, re-run learn_account, then proceed
+4. If no cross-account match for the investigated service, proceed normally
+
 ### Phase 1 — Parallel Agent Dispatch
 
 Spawn ALL 6 specialist agents simultaneously. Each receives the same context envelope:
