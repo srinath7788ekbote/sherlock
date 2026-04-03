@@ -1465,6 +1465,79 @@ async def investigate_service(
                 ),
             }
 
+        # ── SESSION MEMORY SNAPSHOT ──────────────────────────
+
+        try:
+            from core.session_memory import SessionMemory, InvestigationSnapshot
+
+            overall_sev = _overall_status(findings)
+
+            # Extract root cause from diagnosis_summary (first sentence).
+            root_cause_text = diagnosis_summary.split(";")[0] if diagnosis_summary else ""
+
+            # Extract error rate from APM findings if available.
+            inv_error_rate = None
+            for f in findings:
+                if f.get("source") == "APM" and "error rate" in f.get("finding", "").lower():
+                    import re as _re
+                    rate_match = _re.search(r"([\d.]+)%", f["finding"])
+                    if rate_match:
+                        inv_error_rate = float(rate_match.group(1))
+                        break
+
+            # Extract open incident IDs.
+            open_ids = []
+            if anchor.active_incident:
+                inc_id = anchor.active_incident.get("incidentId",
+                         anchor.active_incident.get("id", ""))
+                if inc_id:
+                    open_ids.append(str(inc_id))
+
+            # Detect chronic and causal pattern.
+            causal_pat = "NONE"
+            chronic = False
+            if pattern_analysis and pattern_analysis.get("occurrences", 0) > 5:
+                chronic = True
+                causal_pat = "CHRONIC"
+            elif diagnosis_summary:
+                ds_lower = diagnosis_summary.lower()
+                if "db" in ds_lower or "database" in ds_lower or "postgres" in ds_lower:
+                    causal_pat = "DB_CASCADE"
+                elif "deploy" in ds_lower:
+                    causal_pat = "DEPLOY_REGRESSION"
+                elif "flood" in ds_lower or "batch" in ds_lower:
+                    causal_pat = "TRAFFIC_FLOOD"
+
+            bare = anchor.primary_service
+            ns = ""
+            if "/" in anchor.primary_service:
+                parts = anchor.primary_service.split("/", 1)
+                ns = parts[0]
+                bare = parts[1]
+
+            snap = InvestigationSnapshot(
+                timestamp=datetime.now(timezone.utc),
+                account_id=str(credentials.account_id),
+                account_name=getattr(
+                    getattr(intelligence, "account_meta", None), "name", ""
+                ) or "",
+                service_name=anchor.primary_service,
+                bare_name=bare,
+                namespace=ns,
+                severity=overall_sev,
+                root_cause=root_cause_text,
+                causal_chain="",
+                causal_pattern=causal_pat,
+                error_rate=inv_error_rate,
+                is_otel=False,
+                open_incident_ids=open_ids,
+                chronic_flag=chronic,
+                since_minutes=anchor.since_minutes,
+            )
+            SessionMemory().record(snap)
+        except Exception:
+            pass  # Never let session memory break the main tool response
+
         # ── FINAL REPORT ───────────────────────────────────────
 
         duration_ms = int((time.time() - start) * 1000)

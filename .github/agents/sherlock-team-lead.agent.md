@@ -138,6 +138,43 @@ live in a different New Relic account:
 3. If engineer confirms a profile, connect to it, re-run learn_account, then proceed
 4. If no cross-account match for the investigated service, proceed normally
 
+### Step 1d — Session Context Check
+
+Before dispatching agents, check for recent investigation history:
+
+```
+mcp_sherlock_get_session_context(limit=3)
+```
+
+**If session context exists:**
+
+1. Prepend the context block to your response before the Domain Status table:
+
+   ```
+   ## Session Context — Recent Investigations
+   [15m ago] eswd-prod/client-service — CRITICAL | PostgreSQL cascade → pods not-ready → 503s
+     Root cause: DB availability=0 at 09:07 UTC
+   [8m ago] eswd-prod/sifi-adapter — WARNING | High error rate
+   ```
+
+2. If the new investigation is for the SAME service investigated <30 min ago:
+   - Note: "Previously investigated {N} minutes ago (severity: {X})"
+   - Compare current findings against prior snapshot
+   - Flag any changes: "Error rate has improved from 12.4% → 0.06%"
+
+3. If engineer's prompt contains follow-up language:
+   ("again", "still", "same", "why", "what about X", "resolved?", "better?")
+   → Check session context FIRST before dispatching full agent team
+   → If recent snapshot exists for the referenced service:
+      - Answer from session context
+      - Only run a fresh investigation if engineer explicitly asks for one
+      - State: "Based on investigation {N} minutes ago: {summary}.
+        Run a fresh check? → @sherlock investigate {service}"
+
+4. If NO session context: skip this step silently, proceed to PARALLEL DISPATCH
+
+**Never block or delay investigation for session context — this is additive only.**
+
 ### Phase 1 — Parallel Agent Dispatch
 
 Spawn ALL 6 specialist agents simultaneously. Each receives the same context envelope:

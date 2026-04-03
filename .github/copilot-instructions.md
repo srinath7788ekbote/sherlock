@@ -460,3 +460,38 @@ If the investigated service name matches a cross-account entity:
 OTel services (`EXT|SERVICE` entity type) are the most common cross-account entities.
 They are instrumented separately from APM services and often report to a dedicated
 observability account.
+
+---
+
+## 10. Session Memory & Investigation Continuity
+
+Sherlock maintains an in-memory record of investigations within the current
+VS Code session. The MCP server process is long-running — memory persists
+between prompts until VS Code restarts.
+
+### When to use session context
+
+| Engineer prompt | Action |
+|----------------|--------|
+| "is X still degraded?" | Check session context first. Re-investigate only if >30 min old. |
+| "why did that happen again?" | Pull root cause from last investigation of that service. |
+| "check the same service" | Use last investigated service name from context. |
+| "has it improved?" | Compare current quick check against prior snapshot severity. |
+| "investigate X" (fresh) | Always run full investigation regardless of context. |
+
+### Session context tool
+
+```
+mcp_sherlock_get_session_context(service_name="X", limit=5)
+```
+
+Returns the last N investigations for the current account, newest first.
+Includes: service, severity, root cause, causal chain, error rate, age.
+
+### Rules
+
+- Session context is ADDITIVE — it supplements investigations, never replaces them
+- If engineer asks to investigate, always investigate — never serve stale context
+- Session context is account-scoped — switching accounts shows that account's history
+- Never mention "session memory" by name — just use the data naturally
+- Never fabricate history — only report what `get_session_context` returns

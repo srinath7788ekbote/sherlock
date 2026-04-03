@@ -1,7 +1,7 @@
 """
 Sherlock — main entry point.
 
-Registers all 21 MCP tools, configures logging, and starts the
+Registers all 22 MCP tools, configures logging, and starts the
 stdio-based MCP server. All tool responses are scrubbed for prompt
 injection before being returned to the client.
 """
@@ -93,6 +93,7 @@ from tools.intelligence_tools import (
     connect_account,
     get_account_summary,
     get_nrql_context,
+    get_session_context_tool,
     learn_account_tool,
     list_profiles,
 )
@@ -162,7 +163,34 @@ TOOLS: list[Tool] = [
         description="Get complete intelligence summary for the active account.",
         inputSchema={"type": "object", "properties": {}},
     ),
-    # 5. get_nrql_context
+    # 5. get_session_context
+    Tool(
+        name="get_session_context",
+        description=(
+            "Return investigation history from the current session. "
+            "Use this to answer follow-up questions like 'is it still degraded?', "
+            "'why did that happen again?', or 'what was the last service we checked?' "
+            "without running a full new investigation. "
+            "Optionally filter by service_name. "
+            "Session history is lost when VS Code restarts."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "service_name": {
+                    "type": "string",
+                    "description": "Optional. Filter to a specific service name.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max number of recent investigations to return (1-10).",
+                    "default": 5,
+                },
+            },
+            "required": [],
+        },
+    ),
+    # 6. get_nrql_context
     Tool(
         name="get_nrql_context",
         description=(
@@ -181,7 +209,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 6. investigate_service
+    # 7. investigate_service
     Tool(
         name="investigate_service",
         description=(
@@ -210,7 +238,7 @@ TOOLS: list[Tool] = [
             "required": ["service_name"],
         },
     ),
-    # 7. investigate_synthetic
+    # 8. investigate_synthetic
     Tool(
         name="investigate_synthetic",
         description=(
@@ -232,7 +260,7 @@ TOOLS: list[Tool] = [
             "required": ["monitor_name"],
         },
     ),
-    # 8. get_service_golden_signals
+    # 9. get_service_golden_signals
     Tool(
         name="get_service_golden_signals",
         description=(
@@ -251,7 +279,7 @@ TOOLS: list[Tool] = [
             "required": ["service_name"],
         },
     ),
-    # 9. get_k8s_health
+    # 10. get_k8s_health
     Tool(
         name="get_k8s_health",
         description=(
@@ -271,7 +299,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 10. search_logs
+    # 11. search_logs
     Tool(
         name="search_logs",
         description=(
@@ -298,7 +326,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 11. get_synthetic_monitors
+    # 12. get_synthetic_monitors
     Tool(
         name="get_synthetic_monitors",
         description=(
@@ -306,7 +334,7 @@ TOOLS: list[Tool] = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
-    # 12. get_monitor_status
+    # 13. get_monitor_status
     Tool(
         name="get_monitor_status",
         description=(
@@ -328,7 +356,7 @@ TOOLS: list[Tool] = [
             "required": ["monitor_name"],
         },
     ),
-    # 13. get_monitor_results
+    # 14. get_monitor_results
     Tool(
         name="get_monitor_results",
         description="Get raw run results for a synthetic monitor, useful for digging into failures.",
@@ -352,13 +380,13 @@ TOOLS: list[Tool] = [
             "required": ["monitor_name"],
         },
     ),
-    # 14. get_apm_applications
+    # 15. get_apm_applications
     Tool(
         name="get_apm_applications",
         description="List all APM applications for the active account.",
         inputSchema={"type": "object", "properties": {}},
     ),
-    # 15. get_app_metrics
+    # 16. get_app_metrics
     Tool(
         name="get_app_metrics",
         description="Get key performance metrics for an APM application.",
@@ -374,7 +402,7 @@ TOOLS: list[Tool] = [
             "required": ["app_name"],
         },
     ),
-    # 16. get_deployments
+    # 17. get_deployments
     Tool(
         name="get_deployments",
         description="Get recent deployment history for an APM application.",
@@ -390,7 +418,7 @@ TOOLS: list[Tool] = [
             "required": ["app_name"],
         },
     ),
-    # 17. get_alerts
+    # 18. get_alerts
     Tool(
         name="get_alerts",
         description=(
@@ -399,7 +427,7 @@ TOOLS: list[Tool] = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
-    # 18. get_incidents
+    # 19. get_incidents
     Tool(
         name="get_incidents",
         description=(
@@ -417,7 +445,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 19. get_service_incidents
+    # 20. get_service_incidents
     Tool(
         name="get_service_incidents",
         description=(
@@ -435,7 +463,7 @@ TOOLS: list[Tool] = [
             "required": ["service_name"],
         },
     ),
-    # 20. run_nrql_query
+    # 21. run_nrql_query
     Tool(
         name="run_nrql_query",
         description="Execute a raw NRQL query. Use get_nrql_context first to get valid names.",
@@ -447,7 +475,7 @@ TOOLS: list[Tool] = [
             "required": ["nrql"],
         },
     ),
-    # 21. get_service_dependencies
+    # 22. get_service_dependencies
     Tool(
         name="get_service_dependencies",
         description=(
@@ -491,6 +519,7 @@ TOOL_HANDLERS = {
     "list_profiles": list_profiles,
     "learn_account": learn_account_tool,
     "get_account_summary": get_account_summary,
+    "get_session_context": get_session_context_tool,
     "get_nrql_context": get_nrql_context,
     "investigate_service": investigate_service,
     "investigate_synthetic": investigate_synthetic,

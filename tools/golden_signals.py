@@ -401,6 +401,30 @@ async def get_service_golden_signals(
                 "⚠️ OTel service detected — using Span events instead of Transaction"
             )
 
+        # Auto-save to session memory
+        try:
+            from core.session_memory import SessionMemory, InvestigationSnapshot
+            from datetime import datetime, timezone as _tz
+            snap = InvestigationSnapshot(
+                timestamp=datetime.now(_tz.utc),
+                account_id=str(credentials.account_id),
+                account_name=getattr(intelligence, "account_meta", None)
+                    and getattr(intelligence.account_meta, "name", "") or "",
+                service_name=resolved_name,
+                bare_name=resolved_name.split("/")[-1] if "/" in resolved_name else resolved_name,
+                namespace=resolved_name.split("/")[0] if "/" in resolved_name else "",
+                severity=overall,
+                root_cause="",
+                causal_chain="",
+                causal_pattern="NONE",
+                error_rate=error_rate,
+                is_otel=is_otel,
+                since_minutes=since_minutes,
+            )
+            SessionMemory().record(snap)
+        except Exception:
+            pass  # Never let session memory break the main tool response
+
         return json.dumps(response)
 
     except Exception as exc:

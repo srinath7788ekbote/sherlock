@@ -573,3 +573,83 @@ async def get_nrql_context(domain: str = "all") -> str:
             "hint": "Ensure you are connected first.",
             "data_available": False,
         })
+
+
+async def get_session_context_tool(
+    service_name: str = "",
+    limit: int = 5,
+) -> str:
+    """Return investigation history from the current session.
+
+    Args:
+        service_name: Optional. Filter to a specific service.
+                      If empty, returns the last ``limit`` investigations.
+        limit: How many recent investigations to return (max 10).
+
+    Returns:
+        JSON string with session context.
+    """
+    from core.session_memory import SessionMemory
+
+    try:
+        ctx = AccountContext()
+        credentials, intelligence = ctx.get_active()
+    except Exception:
+        return json.dumps({
+            "status": "NOT_CONNECTED",
+            "message": "Connect to a New Relic account first.",
+            "session_investigations": [],
+        })
+
+    memory = SessionMemory()
+    account_id = str(credentials.account_id)
+
+    if not memory.has_history(account_id):
+        return json.dumps({
+            "status": "NO_HISTORY",
+            "message": (
+                "No investigations recorded in this session yet. "
+                "Run an investigation first."
+            ),
+            "session_investigations": [],
+        })
+
+    if service_name:
+        snap = memory.find_service(account_id, service_name)
+        if snap:
+            snapshots = [snap]
+        else:
+            return json.dumps({
+                "status": "NOT_FOUND",
+                "message": f"No recent investigation found for '{service_name}'.",
+                "session_investigations": [],
+            })
+    else:
+        limit = max(1, min(limit, 10))
+        snapshots = memory.get_recent(account_id, limit=limit)
+
+    results = []
+    for snap in snapshots:
+        results.append({
+            "service": snap.service_name,
+            "severity": snap.severity,
+            "age_minutes": round(snap.age_minutes(), 1),
+            "root_cause": snap.root_cause,
+            "causal_chain": snap.causal_chain,
+            "causal_pattern": snap.causal_pattern,
+            "error_rate": snap.error_rate,
+            "is_otel": snap.is_otel,
+            "chronic": snap.chronic_flag,
+            "stale_signal": snap.stale_signal_flag,
+            "open_incidents": snap.open_incident_ids,
+            "cross_account_entities": snap.cross_account_entities,
+            "since_minutes": snap.since_minutes,
+            "timestamp": snap.timestamp.isoformat(),
+        })
+
+    return json.dumps({
+        "status": "OK",
+        "account": intelligence.account_meta.name if intelligence else account_id,
+        "session_investigations": results,
+        "context_block": memory.format_context_block(account_id, limit=3),
+    }, default=str)

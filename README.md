@@ -20,7 +20,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 4. [Installation](#installation)
 5. [Sharing with Teammates (Private Repository)](#sharing-with-teammates-private-repository)
 6. [Configuration](#configuration)
-7. [Available Tools (21)](#available-tools-21)
+7. [Available Tools (22)](#available-tools-22)
 8. [Workflows](#workflows)
 9. [Security Model](#security-model)
 10. [Multi-Tenant Profiles](#multi-tenant-profiles)
@@ -34,7 +34,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 
 ## Overview
 
-This MCP server exposes **21 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
+This MCP server exposes **22 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
 
 ### Key Capabilities
 
@@ -431,9 +431,9 @@ python scripts/cli.py
 
 ---
 
-## Available Tools (21)
+## Available Tools (22)
 
-### Connection & Intelligence (5 tools)
+### Connection & Intelligence (6 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
@@ -441,65 +441,66 @@ python scripts/cli.py
 | 2 | `list_profiles` | List all saved credential profiles |
 | 3 | `learn_account` | Re-discover account topology (APM, OTel, K8s, synthetics, alerts, etc.) |
 | 4 | `get_account_summary` | Return a summary of discovered assets (APM, OTel, infra, browser, mobile, workloads) |
-| 5 | `get_nrql_context` | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.) |
+| 5 | `get_session_context` | Return investigation history from the current session for follow-up questions |
+| 6 | `get_nrql_context` | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.) |
 
 ### Query & Exploration (2 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 6 | `run_nrql_query` | Execute any read-only NRQL query (includes deep link to Query Builder) |
-| 7 | `get_entity_guid` | Look up an entity's GUID by name or domain |
+| 7 | `run_nrql_query` | Execute any read-only NRQL query (includes deep link to Query Builder) |
+| 8 | `get_entity_guid` | Look up an entity's GUID by name or domain |
 
 ### APM & Performance (3 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 8 | `get_apm_applications` | List all APM-instrumented applications |
-| 9 | `get_app_metrics` | Get key metrics for a specific application |
-| 10 | `get_deployments` | List recent deployments for an application |
+| 9 | `get_apm_applications` | List all APM-instrumented applications |
+| 10 | `get_app_metrics` | Get key metrics for a specific application |
+| 11 | `get_deployments` | List recent deployments for an application |
 
 ### Alerts & Incidents (3 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 11 | `get_alerts` | List alert policies and their conditions |
-| 12 | `get_incidents` | List incidents filtered by state (open/closed), includes deep links |
-| 13 | `get_service_incidents` | Get incidents for a specific service (fuzzy name resolution) |
+| 12 | `get_alerts` | List alert policies and their conditions |
+| 13 | `get_incidents` | List incidents filtered by state (open/closed), includes deep links |
+| 14 | `get_service_incidents` | Get incidents for a specific service (fuzzy name resolution) |
 
 ### Infrastructure & Kubernetes (1 tool)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 14 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events (with deep links) |
+| 15 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events (with deep links) |
 
 ### Logs (1 tool)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 15 | `search_logs` | Search logs by service, severity, keyword, time window |
+| 16 | `search_logs` | Search logs by service, severity, keyword, time window |
 
 ### Golden Signals (1 tool)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 16 | `get_service_golden_signals` | Get latency, errors, traffic, saturation for a service |
+| 17 | `get_service_golden_signals` | Get latency, errors, traffic, saturation for a service |
 
 ### Synthetics (4 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 17 | `get_synthetic_monitors` | List all synthetic monitors with metadata |
-| 18 | `get_monitor_status` | Deep health check — per-location success rates, diagnosis codes |
-| 19 | `get_monitor_results` | Get recent check results for a monitor |
-| 20 | `investigate_synthetic` | Full investigation — monitor health + APM correlation + recommendations |
+| 18 | `get_synthetic_monitors` | List all synthetic monitors with metadata |
+| 19 | `get_monitor_status` | Deep health check — per-location success rates, diagnosis codes |
+| 20 | `get_monitor_results` | Get recent check results for a monitor |
+| 21 | `investigate_synthetic` | Full investigation — monitor health + APM correlation + recommendations |
 
 ### Investigation (1 tool)
 
 | # | Tool | Description |
 |---|------|-------------|
-| 21 | `investigate_service` | **[LEGACY]** Quick automated check across all domains. For comprehensive investigation, use the agent-team pattern (sherlock-team-lead dispatching to all 6 domain agents) instead |
+| 22 | `investigate_service` | **[LEGACY]** Quick automated check across all domains. For comprehensive investigation, use the agent-team pattern (sherlock-team-lead dispatching to all 6 domain agents) instead |
 
-### Service Dependencies (1 tool — included in the 21 above)
+### Service Dependencies (1 tool — included in the 22 above)
 
 | # | Tool | Description |
 |---|------|-------------|
@@ -778,7 +779,7 @@ sherlock/
 ├── Makefile                    # Development commands
 ├── .env.example                # Environment variable template
 ├── .gitignore
-├── main.py                     # MCP server entry point (21 tools)
+├── main.py                     # MCP server entry point (22 tools)
 ├── .github/
 │   ├── copilot-instructions.md # Agent-team rules, report format, anti-hallucination
 │   ├── agents/                 # 7 agent definitions
@@ -829,7 +830,7 @@ sherlock/
 │   └── dependencies.py         # Service dependency mapping
 ├── scripts/
 │   ├── validate_connection.py   # Interactive connection validator
-│   └── cli.py                  # Interactive CLI for all 21 tools
+│   └── cli.py                  # Interactive CLI for all 22 tools
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
 │   ├── test_alerts.py
