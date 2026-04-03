@@ -7,10 +7,10 @@ run:
 	python main.py
 
 test:
-	pytest tests/ -v
+	pytest tests/ -v -n auto
 
 test-fast:
-	pytest tests/ -x -q
+	pytest tests/ -x -q -n auto
 
 test-synthetics:
 	pytest tests/test_synthetics.py -v

@@ -22,6 +22,12 @@ from core.discovery import (
 )
 from core.utils import InvestigationAnchor
 
+# Under pytest-xdist, parallel workers cause CPU contention that can
+# trigger the 45 s discovery timeout even with mocked HTTP calls.
+# Patch to a generous value so the timeout path is never hit.
+_GENEROUS_TIMEOUT = patch("core.discovery.DISCOVERY_TIMEOUT_S", 600.0)
+pytestmark = pytest.mark.xdist_group("discovery")
+
 
 @pytest.fixture
 def anchor():
@@ -60,6 +66,7 @@ def _empty_nrql_response():
 class TestDiscoverFindsK8sDataWhenPresent:
     """test_discover_finds_k8s_data_when_present"""
 
+    @_GENEROUS_TIMEOUT
     @respx.mock
     @pytest.mark.asyncio
     async def test_discover_finds_k8s_data_when_present(
@@ -93,6 +100,7 @@ class TestDiscoverFindsK8sDataWhenPresent:
 class TestDiscoverSkipsEventTypesWithNoData:
     """test_discover_skips_event_types_with_no_data"""
 
+    @_GENEROUS_TIMEOUT
     @respx.mock
     @pytest.mark.asyncio
     async def test_discover_skips_event_types_with_no_data(
@@ -118,6 +126,7 @@ class TestDiscoverSkipsEventTypesWithNoData:
 class TestDiscoverIdentifiesCorrectFilterAttribute:
     """test_discover_identifies_correct_filter_attribute"""
 
+    @_GENEROUS_TIMEOUT
     @respx.mock
     @pytest.mark.asyncio
     async def test_discover_identifies_correct_filter_attribute(
@@ -154,6 +163,7 @@ class TestDiscoverIdentifiesCorrectFilterAttribute:
 class TestDiscoverRunsAllChecksInParallel:
     """test_discover_runs_all_checks_in_parallel"""
 
+    @_GENEROUS_TIMEOUT
     @respx.mock
     @pytest.mark.asyncio
     async def test_discover_runs_all_checks_in_parallel(
@@ -179,6 +189,7 @@ class TestDiscoverRunsAllChecksInParallel:
 class TestDiscoverReturnsDomainWithData:
     """test_discover_returns_domains_with_data"""
 
+    @_GENEROUS_TIMEOUT
     @respx.mock
     @pytest.mark.asyncio
     async def test_discover_returns_domains_with_data(
@@ -229,6 +240,7 @@ class TestDiscoveryResultEmptyWhenNoDataAnywhere:
         assert len(result.unavailable) == len(EVENT_REGISTRY)
         assert result.domains_with_data == []
 
+    @_GENEROUS_TIMEOUT
     @respx.mock
     @pytest.mark.asyncio
     async def test_discovery_result_empty_when_api_fails(
