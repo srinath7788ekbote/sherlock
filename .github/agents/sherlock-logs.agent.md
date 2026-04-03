@@ -91,6 +91,28 @@ SELECT count(*) FROM Log WHERE `{svc_attr}` LIKE '%{service}%' AND level = 'ERRO
 SELECT message FROM Log WHERE `{svc_attr}` LIKE '%{service}%' AND level = 'ERROR' SINCE {window} minutes ago LIMIT 5
 ```
 
+### Step 6 — Request Attribution (when flood pattern detected)
+
+If Team Lead has flagged Pattern 5 (Traffic Flood), use the `incident-triage` skill's
+Phase 6 (Request Attribution) steps to identify the originating user/customer.
+
+Key questions to answer:
+- What unique task/request IDs existed during the flood window?
+- Which identifiers had the highest volume?
+- What business entity (customer, project, org) do they map to?
+- What user or service account triggered the requests (from upstream service logs)?
+
+Pass attribution findings to Team Lead as:
+```
+ATTRIBUTION: {
+  top_user: "{user_or_source}",
+  request_count: {N},
+  pct_of_total: {pct},
+  context: "{project_or_org}",
+  trigger_type: "batch|user|scheduled|unknown"
+}
+```
+
 ### ⚠️ CRITICAL — Attribute Name Rules
 
 | ❌ WRONG | ✅ RIGHT |

@@ -245,3 +245,86 @@ If the HiveMind MCP server is connected:
 5. `hivemind_get_pipeline` — if deployment correlation found
 
 Merge HiveMind infrastructure context with Sherlock live telemetry for the complete picture.
+
+---
+
+## Phase 6 — REQUEST ATTRIBUTION (When Traffic Flood Detected)
+
+When a Traffic Flood (Pattern 5) is detected, use these steps to identify
+the originating user, customer, or batch job.
+
+### Step 1 — Discover available identifiers in the flooded service
+
+Look for unique identifiers in the service's log messages during the flood window:
+
+```sql
+SELECT keyset() FROM Log
+WHERE entity.name = '{flooded_service}'
+SINCE '{flood_start}' UNTIL '{flood_end}'
+LIMIT 1
+```
+
+Look for attributes like: `taskId`, `requestId`, `request_id`, `correlationId`,
+`traceId`, `jobId`, `userId`, `orderId`, `customerId`, `sessionId`.
+
+### Step 2 — Find the top identifiers by volume
+
+Pick the most relevant identifier discovered in Step 1 and facet by it:
+
+```sql
+SELECT count(*) FROM Log
+WHERE entity.name = '{flooded_service}'
+AND {identifier_attribute} IS NOT NULL
+SINCE '{flood_start}' UNTIL '{flood_end}'
+FACET {identifier_attribute}
+LIMIT 50
+```
+
+### Step 3 — Extract context from top identifier logs
+
+```sql
+SELECT latest(message) FROM Log
+WHERE entity.name = '{flooded_service}'
+AND {identifier_attribute} = '{top_identifier_value}'
+SINCE '{flood_start}' UNTIL '{flood_end}'
+FACET message
+LIMIT 20
+```
+
+Look for: user identifiers, organization names, project IDs, entity IDs,
+or any domain-specific reference in the message text.
+
+### Step 4 — Find the triggering service (switch account if needed)
+
+Search upstream services for the caller that initiated the batch:
+
+```sql
+SELECT count(*) FROM Log
+WHERE entity.name LIKE '%{upstream_service_pattern}%'
+AND message LIKE '%{identifier_value}%'
+SINCE '{flood_start}' UNTIL '{flood_end}'
+FACET message
+LIMIT 30
+```
+
+Look for: email addresses, user IDs, API keys, service accounts, project UUIDs,
+or organization names in message text.
+
+If the upstream service lives in a different account, use `connect_account` to
+switch before querying.
+
+### Step 5 — Attribution summary format
+
+```
+## Request Attribution
+
+| Rank | User / Source | Count | % of Total | Context |
+|------|--------------|-------|------------|---------|
+| 1    | {user_or_source} | {N} | {pct}% | {project_or_org} |
+| 2    | {user_or_source} | {N} | {pct}% | {context} |
+
+**Origin:** Bulk batch submission by {user_or_source} at {time}
+**Identifier:** {identifier_type}={identifier_value}
+**Recommendation:** Rate-limit bulk submissions per user/org.
+  Contact {user_or_source} to stagger future batch requests.
+```

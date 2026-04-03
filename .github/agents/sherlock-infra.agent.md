@@ -75,6 +75,10 @@ You are the **Infrastructure Agent** — specialist in infrastructure health, se
 6. **Assess blast radius**:
    - Count upstream services (who is affected if this fails)
    - Check health of downstream dependencies (is the root cause lower in the stack)
+7. **Traffic flood attribution** (when Team Lead flags Pattern 5):
+   - Identify the upstream caller/producer that sent the batch
+   - Check if a rate-limit or concurrency cap exists on the calling service
+   - Map which downstream services are affected by the flood
 
 ## Primary MCP Tools
 
