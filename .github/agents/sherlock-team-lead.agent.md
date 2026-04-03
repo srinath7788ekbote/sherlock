@@ -118,6 +118,12 @@ STEP 0.4: mcp_sherlock_get_nrql_context(domain="all")
           → Pass these to agents so they use correct NRQL attribute names.
 ```
 
+> **Static vs Dynamic Context:** Instructions in `copilot-instructions.md` above
+> the STATIC BOUNDARY marker are permanent rules. Content injected by tool calls
+> (account context, session history, investigation target) is runtime context and
+> changes every investigation. Never carry over runtime context from a previous
+> investigation without re-verifying.
+
 **NEVER skip Steps 0.1-0.3. Step 0.4 is recommended but can be skipped for speed.**
 
 ### Step 0c — Cross-Account Entity Check (MANDATORY)

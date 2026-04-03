@@ -80,6 +80,53 @@ async def _build_graph_background(
         )
 
 
+def _format_runtime_context_block(
+    account_name: str,
+    account_id: str,
+    region: str,
+    intelligence,  # AccountIntelligence | None
+    cross_account_entities: list,
+) -> str:
+    """
+    Format the runtime context block injected after the static boundary.
+    This is the dynamic section described in copilot-instructions.md.
+    Always call this at the end of connect_account and learn_account.
+    """
+    lines = [
+        "",
+        "## Runtime Account Context",
+        f"Account: {account_name} (ID: {account_id})",
+        f"Region: {region}",
+    ]
+
+    if intelligence:
+        apm = getattr(intelligence, 'apm', None)
+        otel = getattr(intelligence, 'otel', None)
+        k8s = getattr(intelligence, 'k8s', None)
+        synthetics = getattr(intelligence, 'synthetics', None)
+        alerts = getattr(intelligence, 'alerts', None)
+        lines += [
+            f"APM Services: {len(getattr(apm, 'service_names', []))} discovered",
+            f"OTel Services: {getattr(otel, 'service_count', 0)} discovered",
+            f"K8s Namespaces: {len(getattr(k8s, 'namespaces', []))} discovered",
+            f"Synthetic Monitors: {getattr(synthetics, 'total_count', 0)} discovered",
+            f"Alert Policies: {len(getattr(alerts, 'policy_names', []))} discovered",
+        ]
+
+    if cross_account_entities:
+        names = [e.name for e in cross_account_entities]
+        home_accounts = list({e.home_account_id for e in cross_account_entities})
+        lines.append(
+            f"⚠️ Cross-Account Entities: {', '.join(names)} "
+            f"(live in account(s): {', '.join(home_accounts)})"
+        )
+        lines.append(
+            "   → Connect to those accounts to query their telemetry"
+        )
+
+    return "\n".join(lines)
+
+
 async def connect_account(
     account_id: str | None = None,
     api_key: str | None = None,
@@ -248,6 +295,14 @@ async def connect_account(
                 for e in intelligence.cross_account_entities
             ]
 
+        result["runtime_context"] = _format_runtime_context_block(
+            account_name=validation["account_name"],
+            account_id=account_id,
+            region=region.upper(),
+            intelligence=intelligence,
+            cross_account_entities=getattr(intelligence, 'cross_account_entities', []),
+        )
+
         return json.dumps(result)
 
     except Exception as exc:
@@ -323,6 +378,14 @@ async def learn_account_tool() -> str:
                 "These services will NOT appear in NRQL queries against the "
                 "current account."
             )
+
+        result["runtime_context"] = _format_runtime_context_block(
+            account_name=intelligence.account_meta.name,
+            account_id=credentials.account_id,
+            region=credentials.region,
+            intelligence=intelligence,
+            cross_account_entities=getattr(intelligence, 'cross_account_entities', []),
+        )
 
         return json.dumps(result)
 
