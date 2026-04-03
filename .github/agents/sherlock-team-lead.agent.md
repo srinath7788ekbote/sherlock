@@ -181,6 +181,63 @@ mcp_sherlock_get_session_context(limit=3)
 
 **Never block or delay investigation for session context — this is additive only.**
 
+### Step 1e — Frustration / Retry Detection
+
+Check if the engineer is in a retry loop or expressing frustration:
+
+```
+mcp_sherlock_get_frustration_context(
+  prompt="{engineer's message}",
+  service_name="{service being investigated}"
+)
+```
+
+**If mode = NORMAL:** Proceed to PARALLEL DISPATCH as usual.
+
+**If mode = ESCALATION:** Use the following modified investigation strategy:
+
+```
+🔁 RETRY LOOP DETECTED — Switching to Escalation Mode
+Prior investigations: {retry_count}x in recent session
+Prior severities: {prior_severities}
+Escalation focus: {escalation_recommendation}
+```
+
+**Escalation Mode Investigation Strategy:**
+
+1. **Do NOT repeat queries that returned zero results in prior investigations.**
+   Check session context for what was already tried.
+
+2. **Mandatory cross-account check** regardless of whether service was found:
+   Run `get_frustration_context` → if cross_account_entities exist → connect to
+   that account FIRST before dispatching agents.
+
+3. **Widen time window to 180 minutes** (3 hours) instead of default 60.
+
+4. **Run account-wide incident scan** — not just for this service:
+   ```nrql
+   SELECT * FROM NrAiIncident WHERE priority = 'CRITICAL' SINCE 3 hours ago LIMIT 20
+   ```
+
+5. **Try GUID-based entity lookup** if name-based lookup keeps returning nothing:
+   ```nrql
+   SELECT uniques(entity.guid), uniques(entity.name) FROM Span
+   WHERE entity.name LIKE '%{bare_name}%' SINCE 3 hours ago LIMIT 20
+   ```
+
+6. **Report what's DIFFERENT from prior investigations**, not just the current state.
+   If error rate went from 12.4% → 12.1% → 11.8%, that trend matters more than
+   the current value. Always compare against prior snapshots.
+
+7. **Surface the retry pattern prominently** at the top of the investigation report:
+   ```markdown
+   > 🔁 ESCALATION MODE — This is investigation {N} of {service} in {M} minutes.
+   > Prior severities: {list}. Widened window to 3hr. Checked cross-account.
+   > Here is what is different this time:
+   ```
+
+**Always acknowledge the retry loop.** Never pretend it's the first investigation.
+
 ### Phase 1 — Parallel Agent Dispatch
 
 Spawn ALL 6 specialist agents simultaneously. Each receives the same context envelope:

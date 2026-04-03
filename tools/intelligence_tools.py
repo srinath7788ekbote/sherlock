@@ -716,3 +716,48 @@ async def get_session_context_tool(
         "session_investigations": results,
         "context_block": memory.format_context_block(account_id, limit=3),
     }, default=str)
+
+
+async def get_frustration_context_tool(
+    prompt: str = "",
+    service_name: str = "",
+) -> str:
+    """
+    Detect if the engineer is in a frustration/retry loop.
+
+    Call this at the start of any investigation where the engineer's
+    language suggests frustration OR when the same service appears to
+    be investigated repeatedly.
+
+    Args:
+        prompt: The engineer's raw message text (for language signal).
+        service_name: Optional. Service being investigated (for retry signal).
+
+    Returns:
+        JSON with frustration signals and escalation guidance.
+    """
+    from core.utils import detect_frustration_signals
+
+    try:
+        ctx = AccountContext()
+        credentials, _ = ctx.get_active()
+        account_id = str(credentials.account_id)
+    except Exception:
+        account_id = ""
+
+    result = detect_frustration_signals(
+        prompt=prompt,
+        account_id=account_id,
+        service_name=service_name,
+    )
+
+    return json.dumps({
+        "status": "OK",
+        "frustrated": result["frustrated"],
+        "language_signal": result["language_signal"],
+        "retry_signal": result["retry_signal"],
+        "retry_count": result["retry_count"],
+        "prior_severities": result["prior_severities"],
+        "escalation_recommendation": result["recommendation"],
+        "mode": "ESCALATION" if result["frustrated"] else "NORMAL",
+    })

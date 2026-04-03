@@ -557,6 +557,15 @@ When the engineer specifies a service to investigate, parse:
 - Namespace: `{namespace}` (e.g. `eswd-prod`)
 - These are the CURRENT investigation targets — not previous ones
 
+### Frustration / Retry Context
+
+When `get_frustration_context` returns `mode: ESCALATION`:
+- Do NOT repeat the same investigation you just ran
+- Explicitly acknowledge the retry count at the top of your response
+- Change strategy: wider time window, cross-account check, GUID lookup
+- Compare current findings against prior investigation snapshots
+- The engineer needs progress, not repetition
+
 ### Volatile Sections (Never Cache These)
 
 The following are always session-specific and must never be assumed stable:

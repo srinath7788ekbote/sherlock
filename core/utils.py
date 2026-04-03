@@ -5,6 +5,8 @@ Extracted from tools/investigate.py to remove coupling between
 domain-specific tools and the monolith investigation engine.
 """
 
+import re as _re
+
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 
@@ -101,3 +103,114 @@ class InvestigationAnchor(BaseModel):
     until_clause: str = ""
     window_source: str = "default"
     incident_pattern: IncidentPattern | None = None
+
+
+# ── Frustration / Retry Detection ────────────────────────────────────────
+# Adapted from Claude Code's userPromptKeywords.ts.
+# Focused on SRE/incident-response frustration language.
+
+_FRUSTRATION_PATTERN = _re.compile(
+    r'\b('
+    r'wtf|wth|ffs|omfg|'
+    r'still (broken|not working|failing|down)|'
+    r'why is it still|why is this still|'
+    r'same (issue|problem|error|thing) (again|still)|'
+    r'nothing works|not working|'
+    r'checked (\d+ )?times|investigated (\d+ )?times|'
+    r'what the (hell|heck)|'
+    r'so frustrating|this sucks|'
+    r'no (data|results|output|response) (again|still)|'
+    r'still (showing|returning|getting) nothing|'
+    r'why (again|still|always)|'
+    r'keeps (failing|breaking|returning null)|'
+    r'broken again|down again|failing again'
+    r')\b',
+    _re.IGNORECASE,
+)
+
+
+def detect_frustration_signals(
+    prompt: str,
+    account_id: str,
+    service_name: str = "",
+    retry_threshold: int = 2,
+    retry_window_minutes: int = 20,
+) -> dict:
+    """
+    Detect if an engineer is in a frustration/retry loop.
+
+    Combines two signals:
+    1. Language signal: frustration keywords in the prompt (fast regex)
+    2. Retry signal: same service investigated multiple times recently
+
+    Returns a dict with:
+        frustrated: bool — True if either signal fired
+        language_signal: bool — frustration words detected in prompt
+        retry_signal: bool — same service investigated multiple times
+        retry_count: int — how many times this service was investigated recently
+        prior_severities: list[str] — severities from prior investigations
+        recommendation: str — what escalation mode should focus on
+    """
+    from core.session_memory import SessionMemory
+
+    language_signal = bool(_FRUSTRATION_PATTERN.search(prompt)) if prompt else False
+
+    # Retry signal from session memory
+    retry_count = 0
+    prior_severities: list[str] = []
+    retry_signal = False
+
+    try:
+        mem = SessionMemory()
+        recent = mem.get_recent(
+            account_id,
+            limit=10,
+            max_age_minutes=retry_window_minutes,
+        )
+        if service_name:
+            matching = [
+                s for s in recent
+                if (
+                    service_name.lower() in s.service_name.lower()
+                    or service_name.lower() in s.bare_name.lower()
+                    or s.bare_name.lower() in service_name.lower()
+                )
+            ]
+        else:
+            # If no specific service, check if the LAST service was investigated
+            # multiple times (engineer is repeating without naming the service)
+            if recent:
+                last_service = recent[0].service_name
+                matching = [s for s in recent if s.service_name == last_service]
+            else:
+                matching = []
+
+        retry_count = len(matching)
+        prior_severities = [s.severity for s in matching]
+        retry_signal = retry_count >= retry_threshold
+
+    except Exception:
+        pass  # Never let frustration detection break anything
+
+    frustrated = language_signal or retry_signal
+
+    # Build recommendation for escalation mode
+    recommendation = ""
+    if frustrated:
+        hints: list[str] = []
+        if retry_count >= 2:
+            hints.append(f"investigated {retry_count}x recently — skip repeated queries")
+        if all(s == "CRITICAL" for s in prior_severities) and len(prior_severities) >= 2:
+            hints.append("consistently CRITICAL — root cause not yet found")
+        if retry_count == 0 and language_signal:
+            hints.append("first investigation — check cross-account entities and OTel fallback")
+        recommendation = "; ".join(hints) if hints else "escalation mode activated"
+
+    return {
+        "frustrated": frustrated,
+        "language_signal": language_signal,
+        "retry_signal": retry_signal,
+        "retry_count": retry_count,
+        "prior_severities": prior_severities,
+        "recommendation": recommendation,
+    }
