@@ -208,3 +208,41 @@ class TestGetServiceGoldenSignals:
         parsed = json.loads(result)
         # Either returns error or degrades with empty data
         assert isinstance(parsed, dict)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_otel_service_uses_span_queries(self, gs_context):
+        """OTel service (Span data, no Transaction) returns instrumentation='otel'."""
+        def _route(request):
+            body = request.content.decode()
+            # OTel detection: Span count > 0, Transaction count = 0.
+            if "FROM Span" in body and "event_count" in body:
+                return httpx.Response(
+                    200, json=_mock_nrql_response([{"event_count": 500}])
+                )
+            if "FROM Transaction" in body and "event_count" in body:
+                return httpx.Response(
+                    200, json=_mock_nrql_response([{"event_count": 0}])
+                )
+            # OTel golden signals combined query.
+            if "FROM Span" in body and "otel.status_code" in body and "TIMESERIES" not in body:
+                return httpx.Response(200, json=_mock_nrql_response([{
+                    "error_rate": 2.0,
+                    "avg_duration": 0.12,
+                    "percentile.duration.50": 0.08,
+                    "percentile.duration.90": 0.15,
+                    "percentile.duration.95": 0.20,
+                    "percentile.duration.99": 0.35,
+                    "rpm": 600,
+                }]))
+            return httpx.Response(200, json=_mock_nrql_response([]))
+
+        respx.post("https://api.newrelic.com/graphql").mock(side_effect=_route)
+
+        result = await get_service_golden_signals("payment-svc-prod")
+        parsed = json.loads(result)
+        assert parsed["instrumentation"] == "otel"
+        assert parsed["overall_status"] == "HEALTHY"
+        assert parsed["latency"]["avg_duration_s"] == 0.12
+        assert parsed["throughput"]["rpm"] == 600
+        assert any("OTel" in w for w in parsed.get("warnings", []))

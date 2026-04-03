@@ -2,9 +2,11 @@
 APM (Application Performance Monitoring) tools for Sherlock.
 
 Provides tools to list APM applications, get application metrics,
-and retrieve deployment history.
+and retrieve deployment history. Supports both APM-agent (Transaction)
+and OTel-instrumented (Span) services.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -64,6 +66,65 @@ NRQL_DEPLOYMENTS = (
     "FROM Deployment WHERE appName = '%s' "
     "SINCE 30 days ago LIMIT %d"
 )
+
+# ── OTel variants ────────────────────────────────────────────────────────
+
+NRQL_OTEL_CHECK_SPANS = (
+    "SELECT count(*) as event_count FROM Span "
+    "WHERE entity.name = '%s' SINCE 15 minutes ago"
+)
+
+NRQL_OTEL_CHECK_TXNS = (
+    "SELECT count(*) as event_count FROM Transaction "
+    "WHERE appName = '%s' SINCE 15 minutes ago"
+)
+
+NRQL_OTEL_APP_METRICS = (
+    "SELECT average(duration) as avg_response_time, "
+    "rate(count(*), 1 minute) as throughput, "
+    "percentage(count(*), WHERE otel.status_code = 'ERROR') as error_rate "
+    "FROM Span "
+    "WHERE entity.name = '%s' AND span.kind = 'SERVER' "
+    "SINCE %d minutes ago"
+)
+
+NRQL_OTEL_DEPLOYMENTS = (
+    "SELECT latest(service.version) as version, "
+    "latest(deployment.environment) as environment "
+    "FROM Span WHERE entity.name = '%s' SINCE 24 hours ago"
+)
+
+
+async def _is_otel_service_apm(
+    service_name: str,
+    account_id: str,
+    client,
+) -> bool:
+    """Detect OTel service for APM tools (Span present, Transaction absent)."""
+    try:
+        async def _count(template: str) -> int:
+            nrql = template % service_name
+            escaped = nrql.replace('"', '\\"')
+            query = GQL_NRQL_QUERY % (account_id, escaped)
+            result = await client.query(query, timeout_override=10)
+            rows = (
+                result.get("data", {})
+                .get("actor", {})
+                .get("account", {})
+                .get("nrql", {})
+                .get("results", [])
+            )
+            if rows and isinstance(rows[0], dict):
+                return rows[0].get("event_count", 0) or 0
+            return 0
+
+        span_count, txn_count = await asyncio.gather(
+            _count(NRQL_OTEL_CHECK_SPANS),
+            _count(NRQL_OTEL_CHECK_TXNS),
+        )
+        return span_count > 0 and txn_count == 0
+    except Exception:
+        return False
 
 
 async def get_apm_applications() -> str:
@@ -142,7 +203,19 @@ async def get_app_metrics(app_name: str, since_minutes: int = 30) -> str:
             naming_convention=intelligence.naming_convention,
         )
 
-        nrql = NRQL_APP_METRICS % (resolved_name, since_minutes)
+        # Detect OTel vs APM agent instrumentation.
+        is_otel = False
+        try:
+            is_otel = await _is_otel_service_apm(
+                resolved_name, credentials.account_id, client,
+            )
+        except Exception:
+            pass
+
+        if is_otel:
+            nrql = NRQL_OTEL_APP_METRICS % (resolved_name, since_minutes)
+        else:
+            nrql = NRQL_APP_METRICS % (resolved_name, since_minutes)
         escaped_nrql = nrql.replace('"', '\\"')
         query = GQL_NRQL_QUERY % (credentials.account_id, escaped_nrql)
         result = await client.query(query)
@@ -159,12 +232,17 @@ async def get_app_metrics(app_name: str, since_minutes: int = 30) -> str:
         response: dict = {
             "app_name": resolved_name,
             "since_minutes": since_minutes,
+            "instrumentation": "otel" if is_otel else "apm",
             "metrics": metrics[0] if metrics else {},
             "duration_ms": duration_ms,
         }
         if was_fuzzy:
             response["resolved_from"] = app_name
             response["note"] = f"Fuzzy matched '{app_name}' → '{resolved_name}'"
+        if is_otel:
+            response.setdefault("warnings", []).append(
+                "⚠️ OTel service detected — using Span events instead of Transaction"
+            )
 
         return json.dumps(response)
 
@@ -199,7 +277,19 @@ async def get_deployments(app_name: str, limit: int = 10) -> str:
             naming_convention=intelligence.naming_convention,
         )
 
-        nrql = NRQL_DEPLOYMENTS % (resolved_name, limit)
+        # Detect OTel vs APM agent instrumentation.
+        is_otel = False
+        try:
+            is_otel = await _is_otel_service_apm(
+                resolved_name, credentials.account_id, client,
+            )
+        except Exception:
+            pass
+
+        if is_otel:
+            nrql = NRQL_OTEL_DEPLOYMENTS % resolved_name
+        else:
+            nrql = NRQL_DEPLOYMENTS % (resolved_name, limit)
         escaped_nrql = nrql.replace('"', '\\"')
         query = GQL_NRQL_QUERY % (credentials.account_id, escaped_nrql)
         result = await client.query(query)
@@ -215,12 +305,18 @@ async def get_deployments(app_name: str, limit: int = 10) -> str:
         duration_ms = int((time.time() - start) * 1000)
         response: dict = {
             "app_name": resolved_name,
+            "instrumentation": "otel" if is_otel else "apm",
             "total_deployments": len(deployments),
             "deployments": deployments,
             "duration_ms": duration_ms,
         }
         if was_fuzzy:
             response["resolved_from"] = app_name
+        if is_otel:
+            response["note"] = (
+                "OTel service — deployment info extracted from "
+                "service.version and deployment.environment Span attributes"
+            )
 
         return json.dumps(response)
 

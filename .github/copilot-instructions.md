@@ -207,6 +207,25 @@ this, agents may use wrong names in their queries.
 | "Run NRQL" | Direct | `get_nrql_context` first, then `run_nrql_query` |
 | "Quick summary of X" | `investigate_service` (single tool) | Quick check only |
 
+### OTel vs APM Service Detection
+
+Two types of services exist in New Relic. Agents MUST detect which type before querying:
+
+| Type | Event Table | Name Attribute | Error Attribute |
+|------|------------|----------------|-----------------|
+| **APM** | `Transaction`, `TransactionError` | `appName` | `error IS true` |
+| **OTel** | `Span`, `Log` | `entity.name`, `service.name` | `otel.status_code = 'ERROR'` |
+
+OTel services are often identified by entity type `EXT|SERVICE` in their GUID.
+They include Python, Node.js, and Java services instrumented with the OTel SDK
+instead of the New Relic APM agent.
+
+**Detection rule:** If `FROM Transaction WHERE appName = '{service}'` returns 0,
+ALWAYS check `FROM Span WHERE entity.name = '{service}'` before concluding NO_DATA.
+
+Reporting `NO_DATA` on a service without checking both event types is a violation
+of the Anti-Hallucination rules.
+
 ### CLI Agent Usage (VS Code 1.113+)
 
 Sherlock MCP now works inside VS Code CLI agents, not just Copilot Chat.
