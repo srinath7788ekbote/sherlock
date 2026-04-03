@@ -71,16 +71,48 @@ You are the **Alerts Agent** — specialist in New Relic alerts and incidents. Y
    }
    ```
    The Team Lead uses this flag to prepend the CHRONIC ISSUE banner to the report.
-3. **Check account-wide incidents** — `mcp_sherlock_get_incidents(state="open")`
+3. **Stale Alert Check** — for any open incident that has been open >30 minutes:
+
+   **Trigger:** Incident open >30 min AND alert condition uses a custom metric
+   (not a standard Transaction/Synthetic metric).
+
+   **Check if metric is still emitting:**
+   ```sql
+   SELECT count(*) FROM Metric
+   WHERE metricTimesliceName LIKE '%{service_or_metric_name}%'
+   SINCE 30 minutes ago
+   TIMESERIES 5 minutes
+   ```
+
+   If zero data points returned:
+   → Flag as `STALE_SIGNAL` in handoff to Team Lead
+   → Include:
+     - Last known metric value
+     - Time since last data point
+     - Incident ID
+     - Estimated auto-close time (violationTimeLimitSeconds from now)
+
+   **STALE_SIGNAL flag format:**
+   ```
+   STALE_SIGNAL: {
+     incident_id: "{id}",
+     metric_name: "{name}",
+     last_value: "{value}",
+     silent_since_minutes: {N},
+     auto_close_in_hours: {N},
+     recommendation: "MANUALLY_CLOSE"
+   }
+   ```
+4. **Check account-wide incidents** — `mcp_sherlock_get_incidents(state="open")`
    - Look for related incidents across services
    - Cross-service incident correlation
-4. **Get alert policies** — `mcp_sherlock_get_alerts()`
+5. **Get alert policies** — `mcp_sherlock_get_alerts()`
    - Which policies cover this service
    - What conditions are defined
-5. **Analyze incident patterns** with NRQL:
+6. **Analyze incident patterns** with NRQL:
    - `SELECT count(*) FROM NrAiIncident WHERE title LIKE '%service%' FACET priority SINCE 7 days ago`
    - `SELECT count(*) FROM NrAiIncident WHERE title LIKE '%service%' TIMESERIES SINCE 7 days ago`
-6. **Check alert condition evaluation** with NRQL:
+7. **Check alert condition evaluation** with NRQL:
    - Reproduce the NRQL condition to verify current value vs threshold
 
 ## Primary MCP Tools

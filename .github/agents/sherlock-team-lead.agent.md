@@ -319,6 +319,28 @@ If ANY domain agent returns a `CHRONIC_FLAG` in their findings:
 2. In Recommendations, make the systemic fix item #1 with priority CRITICAL.
 3. Add an estimated recurrence: "At current rate, next incident expected in ~{N} hours."
 
+### Stale Signal Banner Rule
+
+If any domain agent returns a `STALE_SIGNAL` flag:
+
+1. Add this block ABOVE the Domain Status table (alongside any Chronic banner):
+
+```markdown
+> 🔒 **STALE ALERT — NOT REFLECTING CURRENT STATE**
+> Incident `{incident_id}` is open but the underlying metric has been silent for
+> **{N} minutes**. The evaluator is replaying the last known value (`{last_value}`)
+> because `fillOption: last_value` with no signal expiration is configured.
+> **Manually close this incident.** Auto-close in ~{hours} hours otherwise.
+> **Fix:** Set `closeViolationsOnExpiration: true` + `expirationDuration: 900`
+> on the alert condition.
+```
+
+2. In Recommendations, make "Manually close stale incident" item #1.
+3. Include a pre-written closing note the engineer can paste into New Relic:
+   > "Metric silent — no new data emitting. Alert stuck open due to
+   > fillOption: last_value with no signal expiration. Manually closing.
+   > Follow-up: set closeViolationsOnExpiration: true + expirationDuration: 900."
+
 ### Nested Subagent Chains (VS Code 1.113+)
 
 VS Code 1.113 supports subagents invoking other subagents. Sherlock can now support
