@@ -290,6 +290,45 @@ within 30 minutes before the spike start
 
 **This MUST appear above the Domain Status table, not buried in findings.**
 
+#### Pattern 5 — Traffic Flood (Batch Dump)
+
+**Trigger:** Any metric, log count, or span count shows a spike of >10x the
+rolling baseline in a 30-minute window, starting from near-zero.
+
+**Confirming NRQL:**
+```sql
+-- Check for traffic spike in logs
+SELECT rate(count(*), 1 minute) FROM Log
+WHERE entity.name = '{service}'
+SINCE 6 hours ago
+TIMESERIES 15 minutes
+
+-- Check for span volume spike
+SELECT rate(count(*), 1 minute) FROM Span
+WHERE entity.name = '{service}'
+SINCE 6 hours ago
+TIMESERIES 15 minutes
+```
+
+If the timeseries shows a sudden jump from ≤5/min to >100/min:
+→ This is a batch flood, not an application bug.
+
+**Causal Chain to state:**
+> "🌊 TRAFFIC FLOOD: {service_name} received {N}x normal request volume at {time}.
+> This is a batch dump or scheduled job, not a user-driven spike — it occurred
+> outside business hours. The downstream failures (throttling, queue backup,
+> timeout) are effects of the flood, not independent causes.
+> **Investigate the producer/caller that sent the batch.**"
+
+**Immediate follow-up questions to surface:**
+1. Was there a scheduled batch job or cron at this time?
+2. Did a customer or integration trigger a bulk export/import?
+3. Is there a rate-limit or concurrency cap on the batch producer?
+
+**Key signal:** If the spike occurs outside business hours (22:00-06:00 UTC)
+and the service is a user-facing product, the traffic is almost certainly
+automated (batch job, webhook, scheduled task, data migration).
+
 #### How to Correlate
 
 After collecting all 6 agent results:

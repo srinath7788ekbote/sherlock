@@ -131,6 +131,11 @@ it MUST explicitly state the full causal chain in plain English:
 > "PostgreSQL availability=0 → health checks fail → pods not-ready → 503s to clients"
 > "Deploy at 14:20 UTC → error rate spike at 14:23 UTC → 5 DLQ'd messages"
 > "Redis timeout → cache miss → DB overload → P95 latency spike"
+> "Batch job dumped N×1000 requests at 00:11 UTC → downstream quota exceeded →
+> throttling exceptions → jobs stuck in pending state → alert fired"
+
+Note: Traffic floods outside business hours are almost always automated
+(scheduled batch, webhook replay, data migration). Do not assume user activity.
 
 **Never just list symptoms.** Always trace from cause to effect.
 
