@@ -53,6 +53,76 @@ mcp_sherlock_get_nrql_context(domain="logs")
 This returns the real attribute names (e.g., `entity.name` vs `service.name` vs `serviceName`).
 Store these as `svc_attr` and `sev_attr` for all subsequent queries.
 
+### Step 0b — Cross-Account Log Check (runs when logs return NO_DATA)
+
+If `search_logs` or direct NRQL log queries return zero results for the
+investigated service:
+
+**Step 1 — Check if service is cross-account:**
+
+Look at the learn_account response or session context for cross-account entities.
+If the investigated service appears in the `cross_account_entities` list:
+
+```
+⚠️ Log data for {service_name} may be in a different New Relic account.
+The service lives in account {home_account_id}, not the currently connected account.
+```
+
+Pass this flag to Team Lead as:
+```
+CROSS_ACCOUNT_LOGS: {
+  service_name: "{service}",
+  likely_account_id: "{home_account_id}",
+  recommendation: "Connect to {home_account_id} profile and re-run log search"
+}
+```
+
+**Step 2 — Try entity.name fallback before giving up:**
+
+Before declaring NO_DATA, try querying by `entity.name` and `service.name`
+(OTel log attributes) instead of `appName` (APM log attribute):
+
+```nrql
+SELECT count(*), latest(message) FROM Log
+WHERE entity.name = '{service_name}'
+   OR service.name = '{service_name}'
+   OR entity.name LIKE '%{bare_name}%'
+SINCE {since_minutes} minutes ago
+FACET level
+LIMIT 20
+```
+
+If this returns data → the service is OTel-instrumented. Use OTel log queries
+going forward. Report:
+```
+⚠️ OTel log format detected — using entity.name instead of appName for log queries.
+```
+
+**Step 3 — Try bare name:**
+
+```nrql
+SELECT count(*), latest(message) FROM Log
+WHERE message LIKE '%{bare_name}%'
+   OR entity.name LIKE '%{bare_name}%'
+SINCE {since_minutes} minutes ago
+FACET entity.name, level
+LIMIT 20
+```
+
+**Only declare NO_DATA** after all three fallbacks fail.
+Never return NO_DATA on the first failed query.
+
+**Handoff format when NO_DATA is genuine:**
+```
+LOGS_RESULT: {
+  status: "NO_DATA",
+  tried: ["appName", "entity.name", "service.name", "bare_name_message"],
+  cross_account_suspected: true/false,
+  likely_account_id: "{if known}",
+  recommendation: "Enable log forwarding OR connect to {account} to see logs"
+}
+```
+
 ### Step 1 — Search Logs (MANDATORY FIRST)
 
 ```

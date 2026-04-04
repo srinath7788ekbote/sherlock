@@ -126,7 +126,26 @@ STEP 0.4: mcp_sherlock_get_nrql_context(domain="all")
 
 **NEVER skip Steps 0.1-0.3. Step 0.4 is recommended but can be skipped for speed.**
 
-### Step 0c — Cross-Account Entity Check (MANDATORY)
+### Step 1b — Force Account Learning (MANDATORY)
+
+After connecting, ALWAYS call learn_account to discover entities and detect
+cross-account services:
+
+```
+mcp_sherlock_learn_account()
+```
+
+**Why this is mandatory:**
+- Cross-account entity detection (Step 1c) ONLY works after learn_account runs
+- Without learn_account, OTel services and services in other accounts are invisible
+- connect_account alone does NOT trigger entity discovery
+- If learn_account was called recently (response includes "Using cached intelligence"),
+  that is fine — the cache is valid and cross-account entities are already known
+
+**Never skip this step.** Even if you believe the account is already learned,
+call it — the response will be instant from cache if already up to date.
+
+### Step 1c — Cross-Account Entity Check (MANDATORY)
 
 After learn_account, check if any services involved in the investigation
 live in a different New Relic account:
@@ -495,6 +514,32 @@ deeper investigation chains without manual follow-up prompts.
 
 **Rule:** Nested chains are capped at 2 hops (agent → subagent → report back).
 Never chain more than 2 levels deep. Always report nested findings back to Team Lead.
+
+### Step 3c — Auto Structured Output (MANDATORY, runs after every investigation)
+
+After completing synthesis, ALWAYS call:
+
+```
+mcp_sherlock_get_structured_report(service_name="{investigated_service}", format="full")
+```
+
+**Do NOT show the full JSON to the engineer** — it is verbose and not human-friendly.
+Instead, append a small block at the bottom of your investigation report:
+
+```markdown
+---
+📋 **Structured output saved.** Use `@sherlock get structured report` to retrieve
+machine-readable JSON for dashboards, exports, or comparison with future investigations.
+```
+
+**If the structured report returns `NO_DATA`:** This means the snapshot was not saved
+correctly. Do NOT surface this as an error — just omit the block silently. The human
+report is still valid.
+
+**Format to call:**
+- For investigations with causal chain found: `format="full"`
+- For quick golden signals only: `format="summary"`
+- Default: `format="full"`
 
 ## ⛔ DEEP LINK RULE — MANDATORY
 
