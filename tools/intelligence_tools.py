@@ -761,3 +761,135 @@ async def get_frustration_context_tool(
         "escalation_recommendation": result["recommendation"],
         "mode": "ESCALATION" if result["frustrated"] else "NORMAL",
     })
+
+
+async def get_structured_report_tool(
+    service_name: str = "",
+    format: str = "full",
+) -> str:
+    """
+    Return the most recent investigation as machine-readable structured JSON.
+
+    This is the machine-readable parallel to the human-readable markdown report.
+    Use this to feed downstream consumers: MTTR dashboards, Slack/Teams,
+    ticketing systems, or programmatic comparisons between investigations.
+
+    The structured report is auto-populated from session memory.
+    Run an investigation first, then call this to get the structured output.
+
+    Args:
+        service_name: Optional. Service to get report for. Uses last if empty.
+        format: "full" (all fields) | "summary" (verdict + root cause only)
+                | "metrics" (numeric metrics only)
+
+    Returns:
+        JSON string with InvestigationReport schema.
+    """
+    import dataclasses
+
+    from core.session_memory import SessionMemory
+    from core.structured_output import empty_report
+
+    try:
+        ctx = AccountContext()
+        credentials, intelligence = ctx.get_active()
+        account_id = str(credentials.account_id)
+        account_name = intelligence.account_meta.name if intelligence else account_id
+    except Exception:
+        return json.dumps({
+            "status": "NOT_CONNECTED",
+            "message": "Connect to a New Relic account first.",
+        })
+
+    mem = SessionMemory()
+
+    # Find the relevant snapshot
+    try:
+        if service_name:
+            snap = mem.find_service(account_id, service_name)
+        else:
+            snap = mem.get_last(account_id)
+    except Exception:
+        snap = None
+
+    if not snap:
+        return json.dumps({
+            "status": "NO_DATA",
+            "message": (
+                "No investigation found in this session. "
+                "Run an investigation first with: "
+                "@sherlock investigate {service_name}"
+            ),
+        })
+
+    # Build report from snapshot
+    try:
+        report = empty_report(snap.service_name, account_id)
+        report.account_name = account_name
+        report.window_minutes = snap.since_minutes
+        report.severity = snap.severity
+        report.root_cause = snap.root_cause
+        report.causal_chain = snap.causal_chain
+        report.causal_pattern = snap.causal_pattern
+        report.error_rate = snap.error_rate
+        report.is_otel = snap.is_otel
+        report.open_incident_ids = snap.open_incident_ids
+        report.chronic_flag = snap.chronic_flag
+        report.stale_signal_flag = snap.stale_signal_flag
+        report.cross_account_entities = snap.cross_account_entities
+
+        # Session context
+        try:
+            recent = mem.get_recent(account_id, limit=10)
+            matching = [
+                s for s in recent
+                if snap.bare_name.lower() in s.bare_name.lower()
+            ]
+            report.retry_count = len(matching)
+        except Exception:
+            report.retry_count = 0
+
+        # Determine confidence
+        if snap.causal_pattern != "NONE" and snap.root_cause:
+            report.confidence = "HIGH"
+        elif snap.severity != "UNKNOWN":
+            report.confidence = "MEDIUM"
+        else:
+            report.confidence = "LOW"
+
+        # Apply format filter
+        if format == "summary":
+            summary = {
+                "service": report.service_name,
+                "severity": report.severity,
+                "root_cause": report.root_cause,
+                "causal_chain": report.causal_chain,
+                "confidence": report.confidence,
+                "age_minutes": round(snap.age_minutes(), 1),
+            }
+            return json.dumps({"status": "OK", "report": summary}, default=str)
+
+        elif format == "metrics":
+            metrics = {
+                "service": report.service_name,
+                "error_rate": report.error_rate,
+                "latency_p95_ms": report.latency_p95_ms,
+                "throughput_rpm": report.throughput_rpm,
+                "is_otel": report.is_otel,
+                "open_incidents": len(report.open_incident_ids),
+                "chronic": report.chronic_flag,
+            }
+            return json.dumps({"status": "OK", "metrics": metrics}, default=str)
+
+        # Default: full report
+        return json.dumps({
+            "status": "OK",
+            "age_minutes": round(snap.age_minutes(), 1),
+            "report": dataclasses.asdict(report),
+        }, default=str)
+
+    except Exception as exc:
+        return json.dumps({
+            "status": "ERROR",
+            "message": f"Failed to build structured report: {exc}",
+        })

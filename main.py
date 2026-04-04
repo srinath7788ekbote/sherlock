@@ -1,7 +1,7 @@
 """
 Sherlock — main entry point.
 
-Registers all 23 MCP tools, configures logging, and starts the
+Registers all 24 MCP tools, configures logging, and starts the
 stdio-based MCP server. All tool responses are scrubbed for prompt
 injection before being returned to the client.
 """
@@ -95,6 +95,7 @@ from tools.intelligence_tools import (
     get_frustration_context_tool,
     get_nrql_context,
     get_session_context_tool,
+    get_structured_report_tool,
     learn_account_tool,
     list_profiles,
 )
@@ -218,7 +219,38 @@ TOOLS: list[Tool] = [
             "required": [],
         },
     ),
-    # 7. get_nrql_context
+    # 7. get_structured_report
+    Tool(
+        name="get_structured_report",
+        description=(
+            "Return the most recent investigation as machine-readable structured JSON. "
+            "This is the machine-readable parallel to the human markdown report. "
+            "Use this to feed MTTR dashboards, Slack/Teams notifications, "
+            "ticketing systems, or programmatic comparisons between investigations. "
+            "Supports three formats: "
+            "'full' (all investigation fields), "
+            "'summary' (verdict + root cause only), "
+            "'metrics' (numeric values only). "
+            "Run an investigation first, then call this."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "service_name": {
+                    "type": "string",
+                    "description": "Optional. Service to get report for. Uses last investigated if empty.",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["full", "summary", "metrics"],
+                    "description": "'full' | 'summary' | 'metrics'. Default: full.",
+                    "default": "full",
+                },
+            },
+            "required": [],
+        },
+    ),
+    # 8. get_nrql_context
     Tool(
         name="get_nrql_context",
         description=(
@@ -549,6 +581,7 @@ TOOL_HANDLERS = {
     "get_account_summary": get_account_summary,
     "get_session_context": get_session_context_tool,
     "get_frustration_context": get_frustration_context_tool,
+    "get_structured_report": get_structured_report_tool,
     "get_nrql_context": get_nrql_context,
     "investigate_service": investigate_service,
     "investigate_synthetic": investigate_synthetic,

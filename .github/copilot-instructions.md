@@ -511,6 +511,22 @@ Includes: service, severity, root cause, causal chain, error rate, age.
 The following sections describe what runtime context looks like when injected
 by Sherlock MCP tools. This content changes every investigation.
 
+### Structured Output
+
+After any investigation, the engineer can request machine-readable JSON:
+
+```
+mcp_sherlock_get_structured_report(service_name="X", format="full")
+```
+
+Available formats:
+- `full` — all investigation fields (for integrations, dashboards)
+- `summary` — verdict + root cause only (for quick comparisons)
+- `metrics` — numeric values only (for charting, alerting)
+
+When an engineer asks for "JSON output", "structured data", "machine readable",
+or wants to "export" or "share" investigation results, call this tool.
+
 ### Connected Account Context
 
 After `connect_account` or `learn_account`, you will receive a structured block:

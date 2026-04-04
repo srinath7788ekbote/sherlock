@@ -20,7 +20,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 4. [Installation](#installation)
 5. [Sharing with Teammates (Private Repository)](#sharing-with-teammates-private-repository)
 6. [Configuration](#configuration)
-7. [Available Tools (23)](#available-tools-23)
+7. [Available Tools (24)](#available-tools-24)
 8. [Workflows](#workflows)
 9. [Security Model](#security-model)
 10. [Multi-Tenant Profiles](#multi-tenant-profiles)
@@ -34,7 +34,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 
 ## Overview
 
-This MCP server exposes **23 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
+This MCP server exposes **24 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
 
 ### Key Capabilities
 
@@ -431,9 +431,9 @@ python scripts/cli.py
 
 ---
 
-## Available Tools (23)
+## Available Tools (24)
 
-### Connection & Intelligence (7 tools)
+### Connection & Intelligence (8 tools)
 
 | # | Tool | Description |
 |---|------|-------------|
@@ -443,7 +443,8 @@ python scripts/cli.py
 | 4 | `get_account_summary` | Return a summary of discovered assets (APM, OTel, infra, browser, mobile, workloads) |
 | 5 | `get_session_context` | Return investigation history from the current session for follow-up questions |
 | 6 | `get_frustration_context` | Detect frustration/retry loops — combines language signals with session retry count to trigger escalation mode |
-| 7 | `get_nrql_context` | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.) |
+| 7 | `get_structured_report` | Return the most recent investigation as machine-readable structured JSON (full, summary, or metrics format) |
+| 8 | `get_nrql_context` | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.) |
 
 ### Query & Exploration (2 tools)
 
