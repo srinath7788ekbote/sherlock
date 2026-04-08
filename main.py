@@ -269,7 +269,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 8. investigate_service
+    # 9. investigate_service
     Tool(
         name="investigate_service",
         description=(
@@ -298,7 +298,7 @@ TOOLS: list[Tool] = [
             "required": ["service_name"],
         },
     ),
-    # 9. investigate_synthetic
+    # 10. investigate_synthetic
     Tool(
         name="investigate_synthetic",
         description=(
@@ -320,7 +320,7 @@ TOOLS: list[Tool] = [
             "required": ["monitor_name"],
         },
     ),
-    # 10. get_service_golden_signals
+    # 11. get_service_golden_signals
     Tool(
         name="get_service_golden_signals",
         description=(
@@ -339,7 +339,7 @@ TOOLS: list[Tool] = [
             "required": ["service_name"],
         },
     ),
-    # 11. get_k8s_health
+    # 12. get_k8s_health
     Tool(
         name="get_k8s_health",
         description=(
@@ -359,7 +359,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 12. search_logs
+    # 13. search_logs
     Tool(
         name="search_logs",
         description=(
@@ -386,7 +386,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 13. get_synthetic_monitors
+    # 14. get_synthetic_monitors
     Tool(
         name="get_synthetic_monitors",
         description=(
@@ -394,7 +394,7 @@ TOOLS: list[Tool] = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
-    # 14. get_monitor_status
+    # 15. get_monitor_status
     Tool(
         name="get_monitor_status",
         description=(
@@ -416,7 +416,7 @@ TOOLS: list[Tool] = [
             "required": ["monitor_name"],
         },
     ),
-    # 15. get_monitor_results
+    # 16. get_monitor_results
     Tool(
         name="get_monitor_results",
         description="Get raw run results for a synthetic monitor, useful for digging into failures.",
@@ -440,13 +440,13 @@ TOOLS: list[Tool] = [
             "required": ["monitor_name"],
         },
     ),
-    # 16. get_apm_applications
+    # 17. get_apm_applications
     Tool(
         name="get_apm_applications",
         description="List all APM applications for the active account.",
         inputSchema={"type": "object", "properties": {}},
     ),
-    # 17. get_app_metrics
+    # 18. get_app_metrics
     Tool(
         name="get_app_metrics",
         description="Get key performance metrics for an APM application.",
@@ -462,7 +462,7 @@ TOOLS: list[Tool] = [
             "required": ["app_name"],
         },
     ),
-    # 18. get_deployments
+    # 19. get_deployments
     Tool(
         name="get_deployments",
         description="Get recent deployment history for an APM application.",
@@ -478,7 +478,7 @@ TOOLS: list[Tool] = [
             "required": ["app_name"],
         },
     ),
-    # 19. get_alerts
+    # 20. get_alerts
     Tool(
         name="get_alerts",
         description=(
@@ -487,7 +487,7 @@ TOOLS: list[Tool] = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
-    # 20. get_incidents
+    # 21. get_incidents
     Tool(
         name="get_incidents",
         description=(
@@ -505,7 +505,7 @@ TOOLS: list[Tool] = [
             },
         },
     ),
-    # 21. get_service_incidents
+    # 22. get_service_incidents
     Tool(
         name="get_service_incidents",
         description=(
@@ -523,7 +523,7 @@ TOOLS: list[Tool] = [
             "required": ["service_name"],
         },
     ),
-    # 22. run_nrql_query
+    # 23. run_nrql_query
     Tool(
         name="run_nrql_query",
         description="Execute a raw NRQL query. Use get_nrql_context first to get valid names.",
@@ -535,7 +535,7 @@ TOOLS: list[Tool] = [
             "required": ["nrql"],
         },
     ),
-    # 23. get_service_dependencies
+    # 24. get_service_dependencies
     Tool(
         name="get_service_dependencies",
         description=(

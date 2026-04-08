@@ -6,11 +6,11 @@ Intelligent New Relic investigation MCP for GitHub Copilot and any MCP-compatibl
 
 Like the detective, Sherlock investigates incidents by gathering clues from every available source — APM, logs, Kubernetes, synthetic monitors, and alerts — then synthesizes them into a clear diagnosis with prioritized recommendations. All from a single natural language prompt.
 
----
+***
 
 A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New Relic observability. Gives AI coding assistants (GitHub Copilot, Claude, Cursor) **read-only** access to your New Relic telemetry via the NerdGraph GraphQL API.
 
----
+***
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 14. [Troubleshooting](#troubleshooting)
 15. [License](#license)
 
----
+***
 
 ## Overview
 
@@ -38,17 +38,17 @@ This MCP server exposes **24 tools** that let an AI assistant query your New Rel
 
 ### Key Capabilities
 
-- **Read-only by design** — every NerdGraph mutation is blocked at the client layer
-- **Agent-team architecture** — 7 specialized agents + 7 skills for comprehensive investigation
-- **Multi-tenant** — switch between accounts/profiles without restarting
-- **Fuzzy name resolution** — typos in service or monitor names are auto-corrected
-- **Prompt-injection scrubbing** — all tool output is scanned before returning to the LLM
-- **Parallel data fetching** — domain agents operate concurrently for speed
-- **Credential security** — API keys stored in OS keychain via `keyring`, never in plain text
-- **Deep links** — every finding includes a clickable URL to the exact New Relic UI view
-- **Service dependency mapping** — automatic dependency graph built from spans, logs, and naming patterns
+* **Read-only by design** — every NerdGraph mutation is blocked at the client layer
+* **Agent-team architecture** — 7 specialized agents + 7 skills for comprehensive investigation
+* **Multi-tenant** — switch between accounts/profiles without restarting
+* **Fuzzy name resolution** — typos in service or monitor names are auto-corrected
+* **Prompt-injection scrubbing** — all tool output is scanned before returning to the LLM
+* **Parallel data fetching** — domain agents operate concurrently for speed
+* **Credential security** — API keys stored in OS keychain via `keyring`, never in plain text
+* **Deep links** — every finding includes a clickable URL to the exact New Relic UI view
+* **Service dependency mapping** — automatic dependency graph built from spans, logs, and naming patterns
 
----
+***
 
 ## Architecture
 
@@ -78,6 +78,7 @@ A Team Lead orchestrates 6 specialist agents, each calling domain-specific MCP t
 │  │                  core/ layer                            │ │
 │  │  context │ credentials │ intelligence │ cache           │ │
 │  │  sanitize │ exceptions │ deeplinks │ utils              │ │
+│  │  session_memory │ structured_output                     │ │
 │  │  dependency_graph │ graph_builder                       │ │
 │  │  discovery [DEPRECATED] │ query_builder [DEPRECATED]    │ │
 │  └──────┬──────────────────────────────────────────────────┘ │
@@ -123,42 +124,43 @@ sherlock-team-lead (synthesize ALL results)
 Unified Investigation Report (all 6 domains)
 ```
 
-| Agent | Specialty | Primary Tools |
-|-------|-----------|---------------|
-| `sherlock-team-lead` | Orchestrator, synthesizer | `connect_account`, `learn_account`, `get_nrql_context` |
-| `sherlock-apm` | Golden signals, transactions, errors, deployments | `get_service_golden_signals`, `get_app_metrics`, `get_deployments` |
-| `sherlock-k8s` | Pods, containers, nodes, K8s events | `get_k8s_health`, `run_nrql_query` |
-| `sherlock-logs` | Error patterns, log volume, exception analysis | `search_logs`, `run_nrql_query` |
-| `sherlock-alerts` | Active incidents, alert policies, violations | `get_service_incidents`, `get_incidents`, `get_alerts` |
-| `sherlock-synthetics` | Monitor health, failure locations, availability | `get_synthetic_monitors`, `get_monitor_status`, `investigate_synthetic` |
-| `sherlock-infra` | Dependencies, host health, browser, messaging | `get_service_dependencies`, `run_nrql_query` |
+| Agent                 | Specialty                                         | Primary Tools                                                           |
+| --------------------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
+| `sherlock-team-lead`  | Orchestrator, synthesizer                         | `connect_account`, `learn_account`, `get_nrql_context`                  |
+| `sherlock-apm`        | Golden signals, transactions, errors, deployments | `get_service_golden_signals`, `get_app_metrics`, `get_deployments`      |
+| `sherlock-k8s`        | Pods, containers, nodes, K8s events               | `get_k8s_health`, `run_nrql_query`                                      |
+| `sherlock-logs`       | Error patterns, log volume, exception analysis    | `search_logs`, `run_nrql_query`                                         |
+| `sherlock-alerts`     | Active incidents, alert policies, violations      | `get_service_incidents`, `get_incidents`, `get_alerts`                  |
+| `sherlock-synthetics` | Monitor health, failure locations, availability   | `get_synthetic_monitors`, `get_monitor_status`, `investigate_synthetic` |
+| `sherlock-infra`      | Dependencies, host health, browser, messaging     | `get_service_dependencies`, `run_nrql_query`                            |
 
 ### Layer Responsibilities
 
-| Layer | Purpose |
-|-------|---------|
-| **main.py** | MCP server lifecycle, tool registration, audit logging, response scrubbing |
-| **tools/** | Individual tool implementations — each file owns one domain |
-| **core/** | Shared primitives — credentials, context, intelligence, cache, sanitization, deep links, utils, dependency graph |
-| **client/** | HTTP transport — NerdGraph client with retry, read-only enforcement, batching |
+| Layer       | Purpose                                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| **main.py** | MCP server lifecycle, tool registration, audit logging, response scrubbing                                       |
+| **tools/**  | Individual tool implementations — each file owns one domain                                                      |
+| **core/**   | Shared primitives — credentials, context, intelligence, cache, sanitization, deep links, utils, dependency graph |
+| **client/** | HTTP transport — NerdGraph client with retry, read-only enforcement, batching                                    |
 
----
+***
 
 ## Prerequisites
 
-| Requirement | Minimum Version |
-|-------------|-----------------|
-| Python | 3.11+ |
-| pip | 23.0+ |
-| New Relic User API Key | `NRAK-...` format |
-| OS Keychain | macOS Keychain / Windows Credential Locker / Linux Secret Service || VS Code | 1.113+ recommended (required for nested subagents and CLI MCP support) |
----
+| Requirement            | Minimum Version                                                   |    |         |                                                                        |
+| ---------------------- | ----------------------------------------------------------------- | :- | :------ | :--------------------------------------------------------------------- |
+| Python                 | 3.11+                                                             |    |         |                                                                        |
+| pip                    | 23.0+                                                             |    |         |                                                                        |
+| New Relic User API Key | `NRAK-...` format                                                 |    |         |                                                                        |
+| OS Keychain            | macOS Keychain / Windows Credential Locker / Linux Secret Service |    | VS Code | 1.113+ recommended (required for nested subagents and CLI MCP support) |
+
+***
 
 ## Installation
 
 ### macOS (recommended)
 
-```bash
+```Shell
 # 1. Install Python 3.11+ via pyenv
 brew install pyenv
 pyenv install 3.11.9
@@ -192,32 +194,33 @@ make run
 
 1. Clone the repository:
 
-```powershell
+```PowerShell
 cd $env:USERPROFILE\Documents
 git clone <repo-url> sherlock
 cd sherlock
 ```
 
-2. Right-click **`setup.bat`** and select **Run as administrator**.
+1. Right-click **`setup.bat`** and select **Run as administrator**.
 
 The script automatically installs Chocolatey, Make, Python (latest), creates the virtual environment, and installs all dependencies. It skips anything already installed.
 
-3. Open a **new terminal** (regular, not admin), then:
+1. Open a **new terminal** (regular, not admin), then:
 
-```powershell
+```PowerShell
 cd $env:USERPROFILE\Documents\sherlock
 .venv\Scripts\activate.bat
 make connect
 ```
 
 This will prompt you for:
-- **Account ID** — your New Relic account ID (numeric)
-- **API Key** — a User API key in `NRAK-...` format ([create one here](https://one.newrelic.com/api-keys))
-- **Region** — `US` or `EU`
+
+* **Account ID** — your New Relic account ID (numeric)
+* **API Key** — a User API key in `NRAK-...` format ([create one here](https://one.newrelic.com/api-keys))
+* **Region** — `US` or `EU`
 
 Credentials are saved securely in Windows Credential Locker.
 
-4. Configure MCP in your AI client (see [MCP Configuration](#mcp-configuration) below).
+1. Configure MCP in your AI client (see [MCP Configuration](#mcp-configuration) below).
 
 #### Manual Setup (step-by-step)
 
@@ -228,7 +231,7 @@ If you prefer to run each step yourself, or if the batch file fails:
 
 **Install Chocolatey** — open PowerShell as Administrator:
 
-```powershell
+```PowerShell
 Set-ExecutionPolicy Bypass -Scope Process -Force
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
 iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
@@ -236,14 +239,14 @@ iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocola
 
 **Install Make and Python** — close and reopen PowerShell, then:
 
-```powershell
+```PowerShell
 choco install make -y
 choco install python -y
 ```
 
 **Clone, create venv, install** — close and reopen PowerShell:
 
-```powershell
+```PowerShell
 cd $env:USERPROFILE\Documents
 git clone <repo-url> sherlock
 cd sherlock
@@ -256,7 +259,7 @@ make install
 
 **Connect and save profile:**
 
-```powershell
+```PowerShell
 make connect
 ```
 
@@ -268,7 +271,7 @@ After setup, add the Sherlock MCP server to your AI client's configuration.
 
 **VS Code / GitHub Copilot** — add to your `settings.json` (or use the pre-configured `.vscode/settings.json` in this repo):
 
-```json
+```JSON
 {
   "github.copilot.chat.mcpServers": {
     "sherlock": {
@@ -285,7 +288,7 @@ After setup, add the Sherlock MCP server to your AI client's configuration.
 
 **Claude Desktop** — add to `%APPDATA%\Claude\claude_desktop_config.json`:
 
-```json
+```JSON
 {
   "mcpServers": {
     "sherlock": {
@@ -299,7 +302,7 @@ After setup, add the Sherlock MCP server to your AI client's configuration.
 
 **Cursor** — add to `.cursor/mcp.json` in your project root (or global config):
 
-```json
+```JSON
 {
   "mcpServers": {
     "sherlock": {
@@ -315,7 +318,7 @@ After setup, add the Sherlock MCP server to your AI client's configuration.
 
 #### Verify everything works
 
-```powershell
+```PowerShell
 # Run the MCP server directly to test
 make run
 # or: python main.py
@@ -337,7 +340,7 @@ The server is pre-configured in `.vscode/settings.json`. After installation:
 3. The MCP server will appear under **GitHub Copilot → MCP Servers**
 4. Use `@sherlock` in Copilot Chat to interact with your telemetry
 
----
+***
 
 ## Sharing with Teammates (Private Repository)
 
@@ -351,7 +354,7 @@ Invite teammates directly from the repository settings:
 2. Click **Add people** and enter each teammate's GitHub username or email
 3. Each teammate accepts the invitation and can then clone the private repository:
 
-```bash
+```Shell
 # HTTPS (no SSH setup required)
 git clone https://github.com/<your-username>/sherlock.git sherlock
 
@@ -371,7 +374,7 @@ If the repository is owned by a GitHub organization:
 
 Teammates can install Sherlock without cloning the repo by using a [GitHub Personal Access Token (PAT)](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with `repo` scope:
 
-```bash
+```Shell
 # Set the token as an environment variable to avoid storing it in shell history
 export GITHUB_PAT=<PAT>
 pip install "git+https://${GITHUB_PAT}@github.com/<your-username>/sherlock.git"
@@ -383,7 +386,7 @@ Replace `<PAT>` with the token and `<your-username>` with the repository owner.
 
 Build a wheel and share it directly (e.g., via Slack, email, or an internal artifact store):
 
-```bash
+```Shell
 # Build the wheel (run once by the maintainer)
 pip install build
 python -m build --wheel
@@ -397,7 +400,7 @@ pip install sherlock-1.0.0-py3-none-any.whl
 
 > **Tip**: use Option 1 or Option 2 if you want teammates to receive future updates automatically via `git pull`. Use Option 3 or Option 4 if you prefer zero-friction installation without requiring GitHub access.
 
----
+***
 
 ## Configuration
 
@@ -405,7 +408,7 @@ pip install sherlock-1.0.0-py3-none-any.whl
 
 Copy `.env.example` to `.env` and fill in:
 
-```bash
+```Shell
 # Required
 NEW_RELIC_ACCOUNT_ID=123456
 NEW_RELIC_API_KEY=NRAK-xxxxxxxxxxxxxxxxxxxx
@@ -420,7 +423,7 @@ CACHE_TTL_SECONDS=1800       # Intelligence cache TTL (default: 30 min)
 
 For multi-tenant setups, use profiles instead of environment variables:
 
-```bash
+```Shell
 # Save a profile (interactive)
 make connect
 
@@ -429,86 +432,85 @@ python scripts/cli.py
 > connect_account production 123456 NRAK-xxx US
 ```
 
----
+***
 
 ## Available Tools (24)
 
 ### Connection & Intelligence (8 tools)
 
-| # | Tool | Description |
-|---|------|-------------|
-| 1 | `connect_account` | Connect to a New Relic account by profile name or credentials |
-| 2 | `list_profiles` | List all saved credential profiles |
-| 3 | `learn_account` | Re-discover account topology (APM, OTel, K8s, synthetics, alerts, etc.) |
-| 4 | `get_account_summary` | Return a summary of discovered assets (APM, OTel, infra, browser, mobile, workloads) |
-| 5 | `get_session_context` | Return investigation history from the current session for follow-up questions |
+| # | Tool                      | Description                                                                                                    |
+| - | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 1 | `connect_account`         | Connect to a New Relic account by profile name or credentials                                                  |
+| 2 | `list_profiles`           | List all saved credential profiles                                                                             |
+| 3 | `learn_account`           | Re-discover account topology (APM, OTel, K8s, synthetics, alerts, etc.)                                        |
+| 4 | `get_account_summary`     | Return a summary of discovered assets (APM, OTel, infra, browser, mobile, workloads)                           |
+| 5 | `get_session_context`     | Return investigation history from the current session for follow-up questions                                  |
 | 6 | `get_frustration_context` | Detect frustration/retry loops — combines language signals with session retry count to trigger escalation mode |
-| 7 | `get_structured_report` | Return the most recent investigation as machine-readable structured JSON (full, summary, or metrics format) |
-| 8 | `get_nrql_context` | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.) |
+| 7 | `get_structured_report`   | Return the most recent investigation as machine-readable structured JSON (full, summary, or metrics format)    |
+| 8 | `get_nrql_context`        | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.)                                    |
 
-### Query & Exploration (2 tools)
+### Query (1 tool)
 
-| # | Tool | Description |
-|---|------|-------------|
-| 8 | `run_nrql_query` | Execute any read-only NRQL query (includes deep link to Query Builder) |
-| 9 | `get_entity_guid` | Look up an entity's GUID by name or domain |
+| # | Tool             | Description                                                            |
+| - | ---------------- | ---------------------------------------------------------------------- |
+| 9 | `run_nrql_query` | Execute any read-only NRQL query (includes deep link to Query Builder) |
 
 ### APM & Performance (3 tools)
 
-| # | Tool | Description |
-|---|------|-------------|
-| 10 | `get_apm_applications` | List all APM-instrumented applications |
-| 11 | `get_app_metrics` | Get key metrics for a specific application |
-| 12 | `get_deployments` | List recent deployments for an application |
+| #  | Tool                   | Description                                |
+| -- | ---------------------- | ------------------------------------------ |
+| 10 | `get_apm_applications` | List all APM-instrumented applications     |
+| 11 | `get_app_metrics`      | Get key metrics for a specific application |
+| 12 | `get_deployments`      | List recent deployments for an application |
 
 ### Alerts & Incidents (3 tools)
 
-| # | Tool | Description |
-|---|------|-------------|
-| 13 | `get_alerts` | List alert policies and their conditions |
-| 14 | `get_incidents` | List incidents filtered by state (open/closed), includes deep links |
-| 15 | `get_service_incidents` | Get incidents for a specific service (fuzzy name resolution) |
+| #  | Tool                    | Description                                                         |
+| -- | ----------------------- | ------------------------------------------------------------------- |
+| 13 | `get_alerts`            | List alert policies and their conditions                            |
+| 14 | `get_incidents`         | List incidents filtered by state (open/closed), includes deep links |
+| 15 | `get_service_incidents` | Get incidents for a specific service (fuzzy name resolution)        |
 
 ### Infrastructure & Kubernetes (1 tool)
 
-| # | Tool | Description |
-|---|------|-------------|
+| #  | Tool             | Description                                                                |
+| -- | ---------------- | -------------------------------------------------------------------------- |
 | 16 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events (with deep links) |
 
 ### Logs (1 tool)
 
-| # | Tool | Description |
-|---|------|-------------|
+| #  | Tool          | Description                                            |
+| -- | ------------- | ------------------------------------------------------ |
 | 17 | `search_logs` | Search logs by service, severity, keyword, time window |
 
 ### Golden Signals (1 tool)
 
-| # | Tool | Description |
-|---|------|-------------|
+| #  | Tool                         | Description                                            |
+| -- | ---------------------------- | ------------------------------------------------------ |
 | 18 | `get_service_golden_signals` | Get latency, errors, traffic, saturation for a service |
 
 ### Synthetics (4 tools)
 
-| # | Tool | Description |
-|---|------|-------------|
-| 19 | `get_synthetic_monitors` | List all synthetic monitors with metadata |
-| 20 | `get_monitor_status` | Deep health check — per-location success rates, diagnosis codes |
-| 21 | `get_monitor_results` | Get recent check results for a monitor |
-| 22 | `investigate_synthetic` | Full investigation — monitor health + APM correlation + recommendations |
+| #  | Tool                     | Description                                                             |
+| -- | ------------------------ | ----------------------------------------------------------------------- |
+| 19 | `get_synthetic_monitors` | List all synthetic monitors with metadata                               |
+| 20 | `get_monitor_status`     | Deep health check — per-location success rates, diagnosis codes         |
+| 21 | `get_monitor_results`    | Get recent check results for a monitor                                  |
+| 22 | `investigate_synthetic`  | Full investigation — monitor health + APM correlation + recommendations |
 
 ### Investigation (1 tool)
 
-| # | Tool | Description |
-|---|------|-------------|
-| 23 | `investigate_service` | **[LEGACY]** Quick automated check across all domains. For comprehensive investigation, use the agent-team pattern (sherlock-team-lead dispatching to all 6 domain agents) instead |
+| #  | Tool                  | Description                                                                                                                                                                         |
+| -- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 23 | `investigate_service` | **\[LEGACY]** Quick automated check across all domains. For comprehensive investigation, use the agent-team pattern (sherlock-team-lead dispatching to all 6 domain agents) instead |
 
-### Service Dependencies (1 tool — included in the 23 above)
+### Service Dependencies (1 tool)
 
-| # | Tool | Description |
-|---|------|-------------|
-| — | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
+| #  | Tool                       | Description                                                                                                                     |
+| -- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 24 | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
 
----
+***
 
 ## Workflows
 
@@ -577,7 +579,7 @@ User: "Show me the top 10 slowest transactions in the last hour"
 → Returns: raw NRQL results as JSON
 ```
 
----
+***
 
 ## Security Model
 
@@ -585,30 +587,30 @@ User: "Show me the top 10 slowest transactions in the last hour"
 
 The `NerdGraphClient` blocks **all** mutations at the transport layer. The following operations are explicitly blocked:
 
-- `syntheticscreate`, `syntheticsupdate`, `syntheticsdelete`
-- `alertsconditioncreate`, `alertsconditionupdate`, `alertsconditiondelete`
-- `dashboardcreate`, `dashboardupdate`, `dashboarddelete`
-- `entitycreate`, `entityupdate`, `entitydelete`
-- `accountcreate`, `apiAccesscreate`
-- `tagTaggingAddTagsToEntity`, `tagTaggingDeleteTagFromEntity`
+* `syntheticscreate`, `syntheticsupdate`, `syntheticsdelete`
+* `alertsconditioncreate`, `alertsconditionupdate`, `alertsconditiondelete`
+* `dashboardcreate`, `dashboardupdate`, `dashboarddelete`
+* `entitycreate`, `entityupdate`, `entitydelete`
+* `accountcreate`, `apiAccesscreate`
+* `tagTaggingAddTagsToEntity`, `tagTaggingDeleteTagFromEntity`
 
 Any attempt to execute a blocked operation raises `ReadOnlyViolation`, logged as a **SECURITY WARNING** in the audit log.
 
 ### Credential Security
 
-- API keys are stored in the **OS keychain** via the `keyring` library
-- Keys are never written to disk, environment variables, or logs
-- The `redacted_key` property masks all but the last 4 characters
-- `model_dump()` excludes the raw API key
+* API keys are stored in the **OS keychain** via the `keyring` library
+* Keys are never written to disk, environment variables, or logs
+* The `redacted_key` property masks all but the last 4 characters
+* `model_dump()` excludes the raw API key
 
 ### Prompt Injection Defense
 
 All tool responses are scanned by `scrub_tool_response()` before returning to the LLM. Detected patterns include:
 
-- "ignore all previous instructions"
-- "you are now" / "act as"
-- "system prompt" / "override"
-- Markdown/HTML injection attempts
+* "ignore all previous instructions"
+* "you are now" / "act as"
+* "system prompt" / "override"
+* Markdown/HTML injection attempts
 
 Malicious content is replaced with a safe redaction message.
 
@@ -616,36 +618,36 @@ Malicious content is replaced with a safe redaction message.
 
 Every tool invocation is logged to `~/.sherlock/logs/audit.log` with:
 
-- Timestamp
-- Tool name
-- Arguments (API keys redacted)
-- Success/failure status
-- Execution duration
+* Timestamp
+* Tool name
+* Arguments (API keys redacted)
+* Success/failure status
+* Execution duration
 
 ### How to Revoke Access
 
 If you suspect an API key has been compromised, or you simply want to remove the MCP server's access to a New Relic account:
 
-1. **Rotate the API key in New Relic.** Go to **[one.newrelic.com](https://one.newrelic.com) → User menu → API keys** and delete or regenerate the key used by this server. This immediately invalidates all sessions using the old key.
+1. **Rotate the API key in New Relic.** Go to **[one.newrelic.com](https://one.newrelic.com)** **→ User menu → API keys** and delete or regenerate the key used by this server. This immediately invalidates all sessions using the old key.
 2. **Delete the local profile.** Run the CLI to remove the stored credential:
-   ```bash
+   ```Shell
    python scripts/cli.py --tool list_profiles      # find the profile name
    # Then delete the keychain entry manually:
    python -c "import keyring; keyring.delete_password('sherlock', '<profile_name>')"
    ```
 3. **Clear the intelligence cache** so no stale data remains on disk:
-   ```bash
+   ```Shell
    rm -rf ~/.sherlock/cache/
    ```
 4. **Review the audit log** at `~/.sherlock/logs/audit.log` to verify which tools were called and when.
 
----
+***
 
 ## Multi-Tenant Profiles
 
 ### Creating Profiles
 
-```bash
+```Shell
 # Interactive
 make connect
 
@@ -672,7 +674,7 @@ python scripts/cli.py
 
 See `profiles/profiles.example.json`:
 
-```json
+```JSON
 [
   {
     "name": "production",
@@ -689,7 +691,7 @@ See `profiles/profiles.example.json`:
 ]
 ```
 
----
+***
 
 ## Synthetics Deep-Dive
 
@@ -697,32 +699,32 @@ See `profiles/profiles.example.json`:
 
 During `learn_account`, the server discovers all synthetic monitors and stores metadata:
 
-- Monitor name, GUID, type (SIMPLE, SCRIPT_BROWSER, SCRIPT_API, etc.)
-- Enabled/disabled status
-- Check locations (AWS regions)
-- Check period (EVERY_MINUTE, EVERY_5_MINUTES, etc.)
-- Associated APM service (if tagged)
+* Monitor name, GUID, type (SIMPLE, SCRIPT\_BROWSER, SCRIPT\_API, etc.)
+* Enabled/disabled status
+* Check locations (AWS regions)
+* Check period (EVERY\_MINUTE, EVERY\_5\_MINUTES, etc.)
+* Associated APM service (if tagged)
 
 ### Diagnosis Codes
 
 `get_monitor_status` returns one of five diagnosis codes:
 
-| Code | Meaning |
-|------|---------|
-| `PASSING` | All locations succeeding, response times normal |
-| `INTERMITTENT` | Some checks failing sporadically across locations |
-| `REGIONAL_FAILURE` | Specific locations consistently failing |
-| `GLOBAL_FAILURE` | All locations failing — likely a service outage |
-| `DEGRADED_PERFORMANCE` | Checks passing but response times elevated |
+| Code                   | Meaning                                           |
+| ---------------------- | ------------------------------------------------- |
+| `PASSING`              | All locations succeeding, response times normal   |
+| `INTERMITTENT`         | Some checks failing sporadically across locations |
+| `REGIONAL_FAILURE`     | Specific locations consistently failing           |
+| `GLOBAL_FAILURE`       | All locations failing — likely a service outage   |
+| `DEGRADED_PERFORMANCE` | Checks passing but response times elevated        |
 
 ### APM Correlation
 
 `investigate_synthetic` cross-references monitor failures with APM data:
 
-- **Global failure + APM errors** → Service-side root cause
-- **Global failure + APM healthy** → Network/DNS/CDN issue
-- **Regional failure** → Regional infrastructure problem
-- **Degraded performance + APM latency** → Upstream dependency slowdown
+* **Global failure + APM errors** → Service-side root cause
+* **Global failure + APM healthy** → Network/DNS/CDN issue
+* **Regional failure** → Regional infrastructure problem
+* **Degraded performance + APM latency** → Upstream dependency slowdown
 
 ### Fuzzy Monitor Resolution
 
@@ -735,7 +737,7 @@ Monitor names are resolved with a **0.5 threshold** using token overlap matching
 "xyz random"  → MonitorNotFoundError  ✗ (suggests closest matches)
 ```
 
----
+***
 
 ## Service Dependencies
 
@@ -743,11 +745,11 @@ Monitor names are resolved with a **0.5 threshold** using token overlap matching
 
 Sherlock automatically builds a service dependency graph during `connect_account`. The graph uses three discovery strategies, merged in priority order:
 
-| Strategy | Confidence | Source |
-|----------|------------|--------|
+| Strategy       | Confidence    | Source                                              |
+| -------------- | ------------- | --------------------------------------------------- |
 | **Span-Based** | 1.0 (highest) | `Span` event data — `peer.service.name`, `http.url` |
-| **Log-Based** | 0.7 | Log error messages containing service references |
-| **Inferred** | 0.4 (lowest) | Shared naming segments between services |
+| **Log-Based**  | 0.7           | Log error messages containing service references    |
+| **Inferred**   | 0.4 (lowest)  | Shared naming segments between services             |
 
 Higher-confidence edges override lower ones when the same dependency is detected by multiple strategies.
 
@@ -769,7 +771,7 @@ User: "What is calling the auth service?"
 
 The `sherlock-infra` agent automatically includes dependency analysis in its investigation reports.
 
----
+***
 
 ## Developer Guide
 
@@ -781,7 +783,7 @@ sherlock/
 ├── Makefile                    # Development commands
 ├── .env.example                # Environment variable template
 ├── .gitignore
-├── main.py                     # MCP server entry point (23 tools)
+├── main.py                     # MCP server entry point (24 tools)
 ├── .github/
 │   ├── copilot-instructions.md # Agent-team rules, report format, anti-hallucination
 │   ├── agents/                 # 7 agent definitions
@@ -792,14 +794,15 @@ sherlock/
 │   │   ├── sherlock-alerts.agent.md
 │   │   ├── sherlock-synthetics.agent.md
 │   │   └── sherlock-infra.agent.md
-│   └── skills/                 # 7 domain skill definitions
+│   └── skills/                 # 8 domain skill definitions
 │       ├── apm-analysis/SKILL.md
 │       ├── k8s-debug/SKILL.md
 │       ├── log-analysis/SKILL.md
 │       ├── alerts-analysis/SKILL.md
 │       ├── synthetic-debug/SKILL.md
 │       ├── infra-analysis/SKILL.md
-│       └── incident-triage/SKILL.md
+│       ├── incident-triage/SKILL.md
+│       └── zero-result-fallback/SKILL.md
 ├── core/
 │   ├── __init__.py
 │   ├── exceptions.py           # Custom exceptions
@@ -812,6 +815,8 @@ sherlock/
 │   ├── deeplinks.py            # New Relic deep link URL builder
 │   ├── dependency_graph.py     # Dependency graph data model and persistence
 │   ├── graph_builder.py        # 3-strategy dependency graph builder (spans, logs, naming)
+│   ├── session_memory.py       # In-memory investigation history for follow-up questions
+│   ├── structured_output.py    # Machine-readable structured report generation
 │   ├── discovery.py            # [DEPRECATED] Data discovery engine
 │   └── query_builder.py        # [DEPRECATED] Dynamic NRQL query generation
 ├── client/
@@ -832,7 +837,7 @@ sherlock/
 │   └── dependencies.py         # Service dependency mapping
 ├── scripts/
 │   ├── validate_connection.py   # Interactive connection validator
-│   └── cli.py                  # Interactive CLI for all 23 tools
+│   └── cli.py                  # Interactive CLI for all 24 tools
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
 │   ├── test_alerts.py
@@ -855,6 +860,9 @@ sherlock/
 │   ├── test_nrql.py
 │   ├── test_query_builder.py
 │   ├── test_sanitize.py
+│   ├── test_session_memory.py
+│   ├── test_structured_output.py
+│   ├── test_frustration_detection.py
 │   └── test_synthetics.py
 ├── profiles/
 │   └── profiles.example.json
@@ -864,7 +872,7 @@ sherlock/
 
 ### Running Tests
 
-```bash
+```Shell
 # All tests
 make test
 
@@ -892,7 +900,7 @@ make test-cov
 
 ### Linting & Formatting
 
-```bash
+```Shell
 # Lint
 make lint
 
@@ -913,30 +921,30 @@ mypy . --strict
 
 ### Key Design Patterns
 
-- **All tool functions are `async`** — they use `await` for NerdGraph calls
-- **Fuzzy name resolution** — use `fuzzy_resolve_service()` or `fuzzy_resolve_monitor()` for user-facing name inputs
-- **Context access** — call `AccountContext().get_active()` to get credentials and intelligence
-- **Error handling** — raise domain exceptions (`ServiceNotFoundError`, etc.) which are caught in `handle_call_tool()`
-- **Response format** — return `json.dumps(...)` from every tool for consistent parsing
+* **All tool functions are** **`async`** — they use `await` for NerdGraph calls
+* **Fuzzy name resolution** — use `fuzzy_resolve_service()` or `fuzzy_resolve_monitor()` for user-facing name inputs
+* **Context access** — call `AccountContext().get_active()` to get credentials and intelligence
+* **Error handling** — raise domain exceptions (`ServiceNotFoundError`, etc.) which are caught in `handle_call_tool()`
+* **Response format** — return `json.dumps(...)` from every tool for consistent parsing
 
----
+***
 
 ## Troubleshooting
 
 ### Common Issues
 
-| Issue | Solution |
-|-------|----------|
-| `NotConnectedError` | Run `connect_account` first |
-| `CredentialError` | Check API key format (`NRAK-...`) and region (US/EU) |
-| `ServiceNotFoundError` | Verify service name with `get_apm_applications` |
-| `MonitorNotFoundError` | Verify monitor name with `get_synthetic_monitors` |
-| `ReadOnlyViolation` | Mutation attempted — this server is read-only by design |
-| `Timeout on investigate` | Increase `INVESTIGATION_TIMEOUT_S` or check network |
+| Issue                    | Solution                                                |
+| ------------------------ | ------------------------------------------------------- |
+| `NotConnectedError`      | Run `connect_account` first                             |
+| `CredentialError`        | Check API key format (`NRAK-...`) and region (US/EU)    |
+| `ServiceNotFoundError`   | Verify service name with `get_apm_applications`         |
+| `MonitorNotFoundError`   | Verify monitor name with `get_synthetic_monitors`       |
+| `ReadOnlyViolation`      | Mutation attempted — this server is read-only by design |
+| `Timeout on investigate` | Increase `INVESTIGATION_TIMEOUT_S` or check network     |
 
 ### Logs
 
-```bash
+```Shell
 # View application logs
 make logs
 
@@ -949,7 +957,7 @@ ls ~/.sherlock/logs/
 
 ### Cache Management
 
-```bash
+```Shell
 # Intelligence cache is at:
 ls ~/.sherlock/cache/
 
@@ -958,7 +966,7 @@ ls ~/.sherlock/cache/
 # → calls learn_account tool
 ```
 
----
+***
 
 ## License
 

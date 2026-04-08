@@ -1,4 +1,4 @@
-.PHONY: install run test test-fast test-synthetics test-investigate test-dependencies test-discovery test-deeplinks test-domain-tools test-cov lint format logs audit connect relearn cli clean
+.PHONY: install run test test-fast test-synthetics test-investigate test-dependencies test-discovery test-deeplinks test-domain-tools test-session-memory test-structured-output test-frustration test-cov lint format logs audit connect relearn cli clean
 
 install:
 	pip install -e ".[dev]"
@@ -31,6 +31,15 @@ test-deeplinks:
 
 test-domain-tools:
 	pytest tests/test_golden_signals.py tests/test_k8s.py tests/test_apm.py tests/test_logs.py tests/test_alerts.py tests/test_synthetics.py -v
+
+test-session-memory:
+	pytest tests/test_session_memory.py -v
+
+test-structured-output:
+	pytest tests/test_structured_output.py -v
+
+test-frustration:
+	pytest tests/test_frustration_detection.py -v
 
 test-cov:
 	pytest tests/ -v --cov=. --cov-report=html --cov-report=term
