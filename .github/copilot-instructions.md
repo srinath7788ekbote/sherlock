@@ -321,6 +321,46 @@ These rules are absolute. Violating any one invalidates the response.
 9. **Never say** "typically", "usually", "in most environments" — report only actual data
 10. **If a domain agent fails**, report the failure — do not silently omit the domain
 
+### NO_DATA Response Standard
+
+Returning NO_DATA after a single failed query is a violation of the
+anti-hallucination rules. It implies absence of evidence where only
+absence of query strategy exists.
+
+**Required NO_DATA format:**
+```
+NO_DATA: {
+  domain: "{domain}",
+  tried: ["query1 (0 results)", "query2 (0 results)", ...],
+  fallbacks_exhausted: true,
+  cross_account_suspected: bool,
+  recommendation: "what to do"
+}
+```
+
+**Minimum fallback attempts before NO_DATA:**
+- Logs: 3 attempts (appName, entity.name, bare name wildcard)
+- APM: 2 attempts (Transaction, Span)
+- Infrastructure metrics: 2 attempts (Metric, Log-based fallback)
+- K8s: 2 attempts (deploymentName exact, podName wildcard)
+
+### Layer 3 Thinking — Required for All 5xx Investigations
+
+When any agent finds 5xx errors, upstream connection failures, or Envoy
+response flags (UH, UC, UF):
+
+**ALWAYS ask:** "What caused the upstream to become unhealthy?"
+
+The symptom (Envoy UH = no healthy upstream) is not the root cause.
+The root cause is what caused all pods to fail health checks:
+- DB connection pool exhausted (check connection pool logs)
+- External dependency down (check Span CLIENT errors)
+- Memory pressure causing OOM (check K8s OOMKill)
+- Azure maintenance (check FATAL termination logs)
+
+**A report that identifies only the Envoy flag is incomplete.**
+A complete report traces back to what caused the flag.
+
 ---
 
 ## 5. K8s Discovery — Critical Naming Rules

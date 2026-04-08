@@ -43,6 +43,18 @@ You are the **Infrastructure Agent** — specialist in infrastructure health, se
 
 ## Investigation Process
 
+### Step 0b — Zero-Result Fallback Protocol
+
+Before reporting NO_DATA for any infra query, follow the zero-result-fallback
+skill. Key infra-specific fallbacks:
+
+- Istio metrics zero → try `FROM Log WHERE container_name='istio-proxy'`
+- Azure metrics zero → try Log-based DB error scan
+- K8s pod data zero → try wildcard `podName LIKE '%{bare_name}%'`
+
+Never return NO_DATA after a single failed query.
+Reference: `.github/skills/zero-result-fallback/SKILL.md`
+
 1. **Map dependencies** — `mcp_sherlock_get_service_dependencies(service_name, direction="both")`
    - Who calls this service? (upstream / blast radius)
    - What does this service call? (downstream / root cause candidates)
@@ -79,6 +91,47 @@ You are the **Infrastructure Agent** — specialist in infrastructure health, se
    - Identify the upstream caller/producer that sent the batch
    - Check if a rate-limit or concurrency cap exists on the calling service
    - Map which downstream services are affected by the flood
+
+### Step 6b — Layer 3: Upstream Cascade Detection (MANDATORY)
+
+After finding any 5xx errors, response flag anomalies, or upstream failures:
+
+**Always run the DB connection error scan:**
+```sql
+SELECT count(*) FROM Log
+WHERE cluster_name IN ('{discovered_cluster_name}')
+AND (
+  message LIKE '%FATAL: terminating connection%'
+  OR message LIKE '%administrator command%'
+  OR message LIKE '%HikariPool%'
+  OR message LIKE '%SQLSTATE%'
+  OR message LIKE '%Connection refused%'
+  OR message LIKE '%pool is empty%'
+)
+SINCE {since_minutes} minutes ago
+TIMESERIES 5 minutes
+FACET entity.name
+LIMIT 20
+```
+
+**If DB connection errors found (>0 results):**
+1. Extract the exact timestamp of first error
+2. Count total affected services (FACET entity.name)
+3. Identify the SQLSTATE code to determine cause type
+4. Check Azure infrastructure for maintenance events
+5. Build Layer 3 summary using the infra-analysis skill template
+6. Add `UPSTREAM_CASCADE: DB_RESTART / MAINTENANCE / OTHER` to Team Lead handoff
+
+**If DB connection errors NOT found:**
+- Check Redis errors: `FROM Log WHERE message LIKE '%redis%' AND level = 'ERROR'`
+- Check ASB throttling: `FROM AzureServiceBusQueueSample WHERE deadLetterMessages > 0`
+- Check external API failures: `FROM Span WHERE span.kind = 'CLIENT' AND otel.status_code = 'ERROR'`
+
+**Cluster name discovery:** Use the cluster name from `learn_account` response
+or from K8s pod data: `SELECT uniques(clusterName) FROM K8sPodSample SINCE 1 hour ago`
+
+**Always check blast radius.** A single DB restart never affects just one service.
+If errors span >2 services, it is almost certainly a shared infrastructure event.
 
 ## Primary MCP Tools
 

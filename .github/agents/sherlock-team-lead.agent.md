@@ -499,6 +499,25 @@ If any domain agent returns a `STALE_SIGNAL` flag:
    > fillOption: last_value with no signal expiration. Manually closing.
    > Follow-up: set closeViolationsOnExpiration: true + expirationDuration: 900."
 
+### Completeness Audit — Upstream Cascade Verification
+
+Before finalising synthesis, verify:
+
+- [ ] **If any domain reports UH/UC Envoy flags OR 5xx spikes:**
+      Did sherlock-infra run the DB connection error scan?
+      If NOT → request it before finalising the report.
+
+- [ ] **If infra returns `UPSTREAM_CASCADE` flag:**
+      The root cause section MUST lead with the cascade, not the symptom.
+      Example: "PostgreSQL maintenance restart (04:05 UTC)" not "Envoy UH flags"
+
+- [ ] **If any domain returns NO_DATA without a tried[] list:**
+      That domain did not follow the zero-result-fallback protocol.
+      Request a retry with fallback queries before reporting NO_DATA.
+
+**Rule:** NO_DATA is only acceptable when accompanied by:
+`tried: [list of attempted queries], fallbacks_exhausted: true`
+
 ### Nested Subagent Chains (VS Code 1.113+)
 
 VS Code 1.113 supports subagents invoking other subagents. Sherlock can now support

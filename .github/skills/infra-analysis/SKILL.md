@@ -205,3 +205,164 @@ Check health of each downstream dependency individually.
 | Disk usage | <75% | 75-90% | >90% |
 | Upstream blast | <3 services | 3-10 services | >10 services |
 | External call P95 | <1s | 1-5s | >5s |
+
+---
+
+## Upstream Cascade Detection (Layer 3 Analysis)
+
+When any 5xx errors, connection failures, or upstream health issues are found,
+ALWAYS run Layer 3 analysis to find what caused the upstream to become unhealthy.
+Do NOT stop at the symptom (e.g., "Envoy UH flag detected"). Find the cause.
+
+### Mandatory DB Connection Error Scan
+
+Run this query whenever investigating 5xx errors, upstream failures, or
+services reporting connection/timeout errors:
+
+```sql
+SELECT count(*) FROM Log
+WHERE cluster_name IN ('{cluster_name}')
+AND (
+  message LIKE '%FATAL: terminating connection%'
+  OR message LIKE '%administrator command%'
+  OR message LIKE '%HikariPool%'
+  OR message LIKE '%SQLSTATE%'
+  OR message LIKE '%Connection refused%'
+  OR message LIKE '%Unable to acquire%'
+  OR message LIKE '%pool is empty%'
+  OR message LIKE '%Connection reset%'
+  OR message LIKE '%Broken pipe%'
+)
+SINCE {since_minutes} minutes ago
+TIMESERIES 5 minutes
+FACET entity.name
+LIMIT 20
+```
+
+**Why this matters:** Database connection errors (PostgreSQL, SQL Server, MySQL)
+manifest as upstream 5xx errors in Istio/nginx. The Envoy response flag `UH`
+(No Healthy Upstream) is frequently caused by all pods failing health checks
+because their DB connections were terminated — not by Istio misconfiguration.
+
+**Blast radius:** Always use `FACET entity.name` — a single DB restart typically
+cascades to ALL services that share that database. Report ALL affected services,
+not just the alerted one.
+
+**SQLSTATE codes to know:**
+| Code | Meaning | Cause |
+|------|---------|-------|
+| `57P01` | Admin shutdown | Azure/GCP/AWS maintenance restart |
+| `08006` | Connection failure | Network interruption |
+| `08001` | Unable to connect | DB down or unreachable |
+| `57014` | Query cancelled | Statement timeout |
+| `40P01` | Deadlock | Query contention |
+
+### Azure Infrastructure Event Correlation
+
+When DB connection errors are found, correlate with Azure maintenance:
+
+```sql
+SELECT latest(provider.availabilityPercent.Average),
+       latest(provider.cpuPercent.Average),
+       latest(provider.activeConnections.Average),
+       latest(provider.connectionsFailed.Count)
+FROM AzurePostgreSqlFlexibleServerSample
+SINCE {since_minutes} minutes ago
+TIMESERIES 5 minutes
+FACET displayName
+LIMIT 10
+```
+
+Also check Redis, Service Bus, and other shared infrastructure:
+```sql
+SELECT latest(provider.serverLoad.Average),
+       latest(provider.connectedClients.Average)
+FROM AzureRedisCacheSample
+SINCE {since_minutes} minutes ago
+FACET displayName
+```
+
+**If AzurePostgreSqlFlexibleServerSample returns zero rows:**
+The Azure integration may not be configured. Fall back to:
+```sql
+SELECT count(*) FROM Log
+WHERE message LIKE '%FATAL%'
+AND (message LIKE '%postgres%' OR message LIKE '%pg%' OR message LIKE '%sql%')
+SINCE {since_minutes} minutes ago
+FACET entity.name
+```
+
+### Istio/Envoy Data Source Priority
+
+**Priority order for Istio telemetry:**
+
+1. **Log-based (try first):**
+```sql
+SELECT count(*) FROM Log
+WHERE container_name = 'istio-proxy'
+AND status > 499
+SINCE {since_minutes} minutes ago
+TIMESERIES 5 minutes
+FACET vhost, status, upstream_cluster
+LIMIT 20
+```
+
+2. **Metric-based (try if Log returns zero):**
+```sql
+SELECT sum(istio_requests_total) FROM Metric
+WHERE response_code LIKE '5%'
+SINCE {since_minutes} minutes ago
+FACET response_flags, destination_service, response_code
+```
+
+3. **Prometheus via OTel (try if both above return zero):**
+```sql
+SELECT rate(sum(istio_requests_total), 1 minute) FROM Metric
+SINCE {since_minutes} minutes ago
+TIMESERIES 5 minutes
+FACET destination_service
+```
+
+**Never report "no Istio data" after only querying one of these sources.**
+
+### Envoy Response Flag Interpretation
+
+When Envoy response flags are found, ALWAYS ask what caused them — never stop
+at the flag itself:
+
+| Flag | Meaning | What to check next |
+|------|---------|-------------------|
+| `UH` | No healthy upstream | → Check pod health, then DB connections, then mTLS config |
+| `UC` | Upstream connection terminated | → Check if DB was restarted, check pod restarts |
+| `UF` | Upstream connection failure | → Check service port naming, mTLS mode |
+| `URX` | Upstream retry limit exceeded | → Check why the upstream is slow (DB queries, OOM) |
+| `NR` | No route match | → Check VirtualService routing rules |
+| `DC` | Downstream disconnect | → Usually client-side, check if cascaded from upstream |
+
+**Rule:** `UH` flag + connection pool FATAL logs in the same time window = DB restart,
+not Istio misconfiguration. Do NOT recommend DestinationRule changes if DB errors
+are present.
+
+### Layer 3 Summary Template
+
+When upstream cascade is detected, add this to the investigation report:
+
+```markdown
+### ⚡ Layer 3 — Upstream Cascade Root Cause
+
+**Primary cause:** {DB restart / Redis eviction / ASB throttle / other}
+**Trigger:** {Azure maintenance / OOM / admin command / network / other}
+**Timestamp:** {exact UTC time from log}
+**Blast radius:** {N} services affected:
+  - {service1}: {N} connection errors
+  - {service2}: {N} connection errors
+  ...
+
+**Why Envoy showed UH/UC flags:** Pods failed health checks because their
+DB connections were terminated — NOT because of Istio misconfiguration.
+
+**Evidence:**
+- `FATAL: terminating connection due to administrator command` at {time}
+- Connection pool timeout across {N} services
+- Azure PostgreSQL `provider.connectionsFailed.Count` spike at {time}
+```
