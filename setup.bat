@@ -32,6 +32,7 @@ if %errorlevel% neq 0 (
     )
     :: Refresh PATH so choco is available in this session
     set "PATH=%ALLUSERSPROFILE%\chocolatey\bin;%PATH%"
+    call refreshenv >nul 2>&1
     echo [1/5] Chocolatey installed.
 ) else (
     echo [1/5] Chocolatey already installed, skipping.
@@ -50,6 +51,7 @@ if %errorlevel% neq 0 (
         pause
         exit /b 1
     )
+    call refreshenv >nul 2>&1
     echo [2/5] Make installed.
 ) else (
     echo [2/5] Make already installed, skipping.
@@ -69,12 +71,28 @@ if %errorlevel% neq 0 (
         exit /b 1
     )
     :: Refresh PATH for python
+    call refreshenv >nul 2>&1
     for /f "tokens=2*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "PATH=%%B;%PATH%"
     echo [3/5] Python installed.
 ) else (
     echo [3/5] Python already installed, skipping.
 )
 echo.
+
+:: --------------------------------------------------
+:: Verify prerequisites are on PATH
+:: --------------------------------------------------
+where python >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Python is not on PATH. Please close this terminal and open a new one,
+    echo         then re-run setup.bat.
+    pause
+    exit /b 1
+)
+where make >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [WARNING] Make is not on PATH yet. It will be available in a new terminal.
+)
 
 :: --------------------------------------------------
 :: Step 4 - Create virtual environment

@@ -168,7 +168,7 @@ pyenv local 3.11.9
 
 # 2. Clone the repository
 cd ~/Documents
-git clone <repo-url> sherlock
+git clone https://github.com/ekbotesrinath/sherlock.git sherlock
 cd sherlock
 
 # 3. Create virtual environment
@@ -248,7 +248,7 @@ choco install python -y
 
 ```PowerShell
 cd $env:USERPROFILE\Documents
-git clone <repo-url> sherlock
+git clone https://github.com/ekbotesrinath/sherlock.git sherlock
 cd sherlock
 python -m venv .venv
 .venv\Scripts\Activate.ps1
