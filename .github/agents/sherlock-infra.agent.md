@@ -70,10 +70,81 @@ Reference: `.github/skills/zero-result-fallback/SKILL.md`
        → Note: "Azure PostgreSQL server {name} was completely unavailable at {time}.
          This explains ALL downstream application errors. Fix DB first."
        → Handoff to Team Lead immediately with this finding — do NOT wait for other steps
-     - If `AzureServiceBusSample` shows `dlq_msgs > 0`:
-       → Flag as 🟡 WARNING
-       → Note: "Dead-lettered messages on {queue_name}: {count}. Manual replay required."
      - If Azure queries return NO_DATA: report `⚪ Azure integration: not configured` and continue
+
+#### Step 2b — Azure Service Bus
+
+**Use discovered intelligence — do NOT guess namespace or queue names.**
+
+Get ASB topology from the learn_account response:
+```
+AccountIntelligence.azure_service_bus:
+  namespaces: [list of namespace names for this account]
+  queues: [list of {entity_name, namespace, active_messages, dead_letter_messages}]
+  topics: [list of {entity_name, namespace, incoming_messages}]
+  dlq_count: N  ← ALWAYS investigate if > 0
+```
+
+**Step 1 — If ASB is configured (`azure_service_bus.configured = True`):**
+
+Query the relevant queues for the investigated service using discovered names:
+```nrql
+SELECT latest(activeMessages.Average) as active_msgs,
+       latest(deadLetterMessages) as dlq_msgs,
+       latest(incomingMessages.Total) as incoming_msgs
+FROM AzureServiceBusQueueSample
+WHERE namespace = '{discovered_namespace}'
+AND entityName LIKE '%{bare_name}%'
+SINCE {since_minutes} minutes ago
+TIMESERIES 10 minutes
+FACET entityName
+```
+
+If no queues match the service name, show all queues in the namespace ordered
+by activity:
+```nrql
+SELECT latest(activeMessages.Average) as active_msgs,
+       latest(deadLetterMessages) as dlq_msgs,
+       latest(incomingMessages.Total) as incoming_msgs
+FROM AzureServiceBusQueueSample
+WHERE namespace = '{discovered_namespace}'
+SINCE {since_minutes} minutes ago
+FACET entityName
+ORDER BY latest(activeMessages.Average) DESC
+LIMIT 20
+```
+
+**Step 2 — DLQ is MANDATORY to report whenever > 0:**
+- `dlq_msgs > 0` → 🟡 ALWAYS report: "N dead-lettered messages on {queue}"
+- `dlq_msgs > 10` → 🔴 CRITICAL — significant message loss
+- Large stable DLQ → pre-existing problem (note: may predate today's incident)
+
+**Step 3 — If `azure_service_bus.configured = False`:**
+Report `⚪ Azure Service Bus: not configured in this account` and continue.
+Do NOT attempt queries — they will return zero.
+
+**Step 4 — Topic activity (pub/sub services):**
+```nrql
+SELECT latest(incomingMessages.Total) as incoming
+FROM AzureServiceBusTopicSample
+WHERE namespace = '{discovered_namespace}'
+AND entityName LIKE '%{bare_name}%'
+SINCE {since_minutes} minutes ago
+TIMESERIES 10 minutes
+FACET entityName
+```
+
+**Step 5 — Custom messaging processing time (if account has it):**
+```nrql
+SELECT average(newrelic.timeslice.value)
+FROM Metric
+WHERE metricTimesliceName LIKE 'Custom/Messaging/%/TimeToProcess'
+AND k8s.namespaceName LIKE '%{k8s_namespace}%'
+SINCE {since_minutes} minutes ago
+FACET aparse(metricTimesliceName, 'Custom/Messaging/*/TimeToProcess')
+TIMESERIES
+```
+
 3. **Check infrastructure metrics** with NRQL:
    - Host CPU: `SELECT average(cpuPercent) FROM SystemSample WHERE hostname LIKE '%service%' TIMESERIES SINCE 1 hour ago`
    - Host memory: `SELECT average(memoryUsedPercent) FROM SystemSample WHERE hostname LIKE '%service%' TIMESERIES SINCE 1 hour ago`

@@ -124,6 +124,23 @@ def _format_runtime_context_block(
             "   → Connect to those accounts to query their telemetry"
         )
 
+    # Azure Service Bus summary
+    asb = getattr(intelligence, "azure_service_bus", None)
+    if asb and asb.configured:
+        lines.append(
+            f"Azure Service Bus: {asb.queue_count} queues, "
+            f"{asb.topic_count} topics in {len(asb.namespaces)} namespace(s)"
+        )
+        if asb.namespaces:
+            lines.append(f"  Namespaces: {', '.join(asb.namespaces)}")
+        if asb.dlq_count > 0:
+            lines.append(
+                f"  ⚠️ DLQ: {asb.dlq_count} queues have dead-lettered messages "
+                f"(total: {int(asb.total_dlq_messages)} msgs)"
+            )
+        if asb.queue_prefixes:
+            lines.append(f"  Queue prefixes: {', '.join(asb.queue_prefixes)}")
+
     return "\n".join(lines)
 
 
@@ -378,6 +395,24 @@ async def learn_account_tool() -> str:
                 "These services will NOT appear in NRQL queries against the "
                 "current account."
             )
+
+        # Azure Service Bus
+        asb = intelligence.azure_service_bus
+        if asb.configured:
+            result["azure_service_bus"] = {
+                "configured": True,
+                "queue_count": asb.queue_count,
+                "topic_count": asb.topic_count,
+                "namespaces": asb.namespaces,
+                "dlq_count": asb.dlq_count,
+                "total_dlq_messages": int(asb.total_dlq_messages),
+                "queue_prefixes": asb.queue_prefixes,
+            }
+        else:
+            result["azure_service_bus"] = {
+                "configured": False,
+                "note": "Azure Service Bus not configured in this account",
+            }
 
         result["runtime_context"] = _format_runtime_context_block(
             account_name=intelligence.account_meta.name,

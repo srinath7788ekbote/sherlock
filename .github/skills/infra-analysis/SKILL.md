@@ -87,28 +87,36 @@ SINCE {since_minutes} minutes ago TIMESERIES 5 minutes
 - `failed_connections > 0` → 🟡 WARNING — investigate pg_hba.conf and SSL config
 - `active_connections > (max_connections * 0.8)` → 🟡 WARNING — connection saturation
 
-#### Azure Service Bus
-```sql
--- Queue health and dead-letter status
-SELECT sum(provider.activeMessages.Average) as active_msgs,
-       sum(provider.deadLetteredMessages.Average) as dlq_msgs,
-       sum(provider.incomingMessages.Total) as incoming,
-       sum(provider.outgoingMessages.Total) as outgoing
-FROM AzureServiceBusSample
-FACET displayName, entityName
-SINCE {since_minutes} minutes ago
+#### Azure Service Bus — Discovery-First Queries
 
--- DLQ spike detection
-SELECT sum(provider.deadLetteredMessages.Average) as dlq_msgs
-FROM AzureServiceBusSample
-TIMESERIES 5 minutes
-SINCE {since_minutes} minutes ago
+**ALWAYS use namespaces and queue names from `AccountIntelligence.azure_service_bus`.
+Never hardcode namespace or entity names — they vary per client and environment.**
+
+If `AccountIntelligence` is not available, discover first:
+```sql
+-- Discover all ASB namespaces in this account
+SELECT uniques(namespace, 30), uniques(entityName, 100)
+FROM AzureServiceBusQueueSample
+SINCE 1 hour ago LIMIT 1
 ```
 
-**Thresholds:**
-- `dlq_msgs > 0` → 🟡 WARNING — messages dead-lettered, manual replay may be needed
-- `dlq_msgs > 10` → 🔴 CRITICAL — significant message loss, investigate immediately
-- `active_msgs growing + outgoing = 0` → 🔴 CRITICAL — consumer is down
+Use the returned values in all subsequent queries.
+
+**Correct event types and attribute names:**
+
+| What to query | Event type | Key attributes |
+|---|---|---|
+| Queue metrics | `AzureServiceBusQueueSample` | `activeMessages.Average`, `deadLetterMessages`, `incomingMessages.Total`, `messages` |
+| Topic metrics | `AzureServiceBusTopicSample` | `incomingMessages.Total`, `entityName`, `namespace` |
+| Namespace metrics | `AzureServiceBusNamespaceSample` | `memoryUsagePercent.Maximum`, `entityName` |
+
+**Filter fields:** Use `namespace = '{name}'` and `entityName LIKE '%{name}%'` —
+NOT `displayName` (that field does not exist in these event types).
+
+**DLQ thresholds:**
+- `deadLetterMessages > 0` → 🟡 ALWAYS report
+- `deadLetterMessages > 10` → 🔴 CRITICAL
+- Growing `activeMessages` with zero `incomingMessages` → consumer is DOWN
 
 #### Azure Redis Cache
 ```sql

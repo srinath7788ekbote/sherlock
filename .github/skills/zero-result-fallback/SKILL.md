@@ -38,6 +38,11 @@ ALL applicable fallbacks are exhausted.
 | `FROM AzurePostgreSqlFlexibleServerSample` (zero rows) | `FROM Log WHERE message LIKE '%FATAL%' OR '%postgresql%'` |
 | `FROM K8sPodSample WHERE deploymentName = '{service}'` | `FROM K8sPodSample WHERE podName LIKE '%{bare_name}%'` |
 | `FROM K8sContainerSample WHERE containerName = '{service}'` | `FROM K8sPodSample WHERE namespaceName = '{namespace}'` |
+| `FROM AzureServiceBusSample` returns zero | Try `FROM AzureServiceBusQueueSample` with `FACET entityName, namespace` |
+| `FROM AzureServiceBusQueueSample` with `provider.` prefix attributes returns zero | Remove `provider.` prefix — use `activeMessages.Average` not `provider.activeMessages.Average` |
+| `WHERE displayName LIKE '%service%'` on ASB returns zero | Try `WHERE entityName LIKE '%service%'` — ASB uses `entityName` not `displayName` |
+| `FROM AzureServiceBusQueueSample` returns zero entirely | Try `FROM AzureServiceBusTopicSample` or check `AccountIntelligence.azure_service_bus.configured` |
+| Any ASB query returns zero and `configured = False` | ASB is not in this account — skip all ASB queries, report `⚪ Not configured` |
 
 ### Level 2 — Wrong Account
 

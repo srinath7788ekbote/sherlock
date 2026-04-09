@@ -358,6 +358,34 @@ NRQL_TOP_ERRORS = (
     " FACET error.class SINCE 7 days ago LIMIT 20"
 )
 
+# ── Azure Service Bus Discovery ──────────────────────────────────────────────
+
+NRQL_ASB_QUEUES = """
+SELECT latest(activeMessages.Average) as active_msgs,
+       latest(deadLetterMessages) as dlq_msgs,
+       latest(incomingMessages.Total) as incoming_msgs,
+       latest(messages) as total_msgs
+FROM AzureServiceBusQueueSample
+SINCE 1 hour ago
+FACET entityName, namespace
+LIMIT 100
+"""
+
+NRQL_ASB_TOPICS = """
+SELECT latest(incomingMessages.Total) as incoming_msgs
+FROM AzureServiceBusTopicSample
+SINCE 1 hour ago
+FACET entityName, namespace
+LIMIT 100
+"""
+
+NRQL_ASB_NAMESPACES = """
+SELECT uniques(entityName, 10)
+FROM AzureServiceBusNamespaceSample
+SINCE 1 hour ago
+LIMIT 1
+"""
+
 NRQL_SYNTHETIC_LOCATIONS = (
     "SELECT latest(locationLabel), latest(result), latest(duration), latest(error)"
     " FROM SyntheticCheck WHERE monitorName = '%s'"
@@ -502,6 +530,38 @@ class WorkloadIntelligence(BaseModel):
     workload_count: int = 0
 
 
+class AzureServiceBusQueueMeta(BaseModel):
+    """Metadata for a single discovered ASB queue."""
+    entity_name: str = ""        # e.g. 'prod-arelle-validation-queue'
+    namespace: str = ""          # e.g. 'sbns-eus2-prd-eswd-prdtngo'
+    active_messages: float = 0.0
+    dead_letter_messages: float = 0.0
+    incoming_messages: float = 0.0
+    has_dlq: bool = False        # True if dead_letter_messages > 0
+    prefix: str = ""             # e.g. 'prod' (text before first '-')
+
+
+class AzureServiceBusTopicMeta(BaseModel):
+    """Metadata for a single discovered ASB topic."""
+    entity_name: str = ""
+    namespace: str = ""
+    incoming_messages: float = 0.0
+
+
+class AzureServiceBusIntelligence(BaseModel):
+    """Intelligence about Azure Service Bus resources discovered during learn_account."""
+    configured: bool = False            # True if any ASB data found in account
+    namespaces: list[str] = Field(default_factory=list)
+    queues: list[AzureServiceBusQueueMeta] = Field(default_factory=list)
+    topics: list[AzureServiceBusTopicMeta] = Field(default_factory=list)
+    queue_count: int = 0
+    topic_count: int = 0
+    dlq_count: int = 0                  # queues with dead_letter_messages > 0
+    total_dlq_messages: float = 0.0     # sum across all queues
+    queue_prefixes: list[str] = Field(default_factory=list)  # e.g. ['prod', 'dev']
+    naming_pattern: str = ""            # inferred e.g. '{prefix}-{service}-queue'
+
+
 class CrossAccountEntity(BaseModel):
     """An entity whose GUID encodes a different account than the connected one."""
 
@@ -608,6 +668,9 @@ class AccountIntelligence(BaseModel):
     entity_counts: EntityCountsSummary = Field(default_factory=EntityCountsSummary)
     account_meta: AccountMeta = Field(default_factory=AccountMeta)
     naming_convention: NamingConvention = Field(default_factory=NamingConvention)
+    azure_service_bus: AzureServiceBusIntelligence = Field(
+        default_factory=AzureServiceBusIntelligence
+    )
     cross_account_entities: list[CrossAccountEntity] = Field(default_factory=list)
 
 
@@ -763,6 +826,105 @@ def detect_cross_account_entities(
             ))
 
     return cross
+
+
+def _parse_asb_intelligence(
+    queue_rows: list,
+    topic_rows: list,
+) -> "AzureServiceBusIntelligence":
+    """Parse ASB NRQL discovery results into AzureServiceBusIntelligence.
+
+    Called from learn_account after the parallel gather completes.
+    Accepts the raw results lists returned by _nrql().
+    Handles accounts with no ASB gracefully (returns configured=False).
+    """
+    intel = AzureServiceBusIntelligence()
+
+    # ── Parse queues ─────────────────────────────────────────────────────
+    namespaces_seen: set[str] = set()
+
+    for row in (queue_rows or []):
+        try:
+            facets = row.get("facets", [])
+            if len(facets) < 2:
+                continue
+            entity_name = str(facets[0] or "")
+            namespace = str(facets[1] or "")
+            if not entity_name or not namespace:
+                continue
+
+            namespaces_seen.add(namespace)
+            prefix = entity_name.split("-")[0] if "-" in entity_name else ""
+
+            # Attribute names vary by account — try both formats
+            active = float(
+                row.get("latest.active_msgs")
+                or row.get("latest.activeMessages.Average")
+                or row.get("activeMessages.Average")
+                or 0
+            )
+            dlq = float(
+                row.get("latest.dlq_msgs")
+                or row.get("latest.deadLetterMessages")
+                or row.get("deadLetterMessages")
+                or 0
+            )
+            incoming = float(
+                row.get("latest.incoming_msgs")
+                or row.get("latest.incomingMessages.Total")
+                or row.get("incomingMessages.Total")
+                or 0
+            )
+
+            intel.queues.append(AzureServiceBusQueueMeta(
+                entity_name=entity_name,
+                namespace=namespace,
+                active_messages=active,
+                dead_letter_messages=dlq,
+                incoming_messages=incoming,
+                has_dlq=dlq > 0,
+                prefix=prefix,
+            ))
+        except Exception:
+            continue
+
+    # ── Parse topics ─────────────────────────────────────────────────────
+    for row in (topic_rows or []):
+        try:
+            facets = row.get("facets", [])
+            if len(facets) < 2:
+                continue
+            entity_name = str(facets[0] or "")
+            namespace = str(facets[1] or "")
+            if not entity_name or not namespace:
+                continue
+            namespaces_seen.add(namespace)
+            incoming = float(
+                row.get("latest.incoming_msgs")
+                or row.get("latest.incomingMessages.Total")
+                or 0
+            )
+            intel.topics.append(AzureServiceBusTopicMeta(
+                entity_name=entity_name,
+                namespace=namespace,
+                incoming_messages=incoming,
+            ))
+        except Exception:
+            continue
+
+    # ── Aggregate ────────────────────────────────────────────────────────
+    intel.namespaces = sorted(namespaces_seen)
+    intel.queue_count = len(intel.queues)
+    intel.topic_count = len(intel.topics)
+    intel.dlq_count = sum(1 for q in intel.queues if q.has_dlq)
+    intel.total_dlq_messages = sum(q.dead_letter_messages for q in intel.queues)
+    intel.queue_prefixes = sorted({q.prefix for q in intel.queues if q.prefix})
+    intel.configured = intel.queue_count > 0 or intel.topic_count > 0
+
+    if intel.queues and intel.queue_prefixes:
+        intel.naming_pattern = f"{intel.queue_prefixes[0]}-{{service}}-queue"
+
+    return intel
 
 
 def _infer_naming_pattern(names: list[str]) -> str:
@@ -1403,6 +1565,9 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
             _nrql(NRQL_K8S_PVC_COUNT),                          # 25: K8s PVC count
             _nrql(NRQL_LOG_COUNT),                              # 26: log count fallback
             _nrql(NRQL_LOG_ATTR_PROBE),                          # 27: log attribute probe
+            _nrql(NRQL_ASB_QUEUES),                              # 28: ASB queues
+            _nrql(NRQL_ASB_TOPICS),                              # 29: ASB topics
+            _nrql(NRQL_ASB_NAMESPACES),                          # 30: ASB namespace names
             return_exceptions=True,
         )
     except Exception as exc:
@@ -1812,6 +1977,19 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
                         pass
     except Exception as synth_exc:
         logger.warning("Synthetics processing failed: %s", synth_exc)
+
+    # ── 28-30: Azure Service Bus ──────────────────────────────────────────
+    try:
+        asb_queue_result = results[28] if not isinstance(results[28], BaseException) else []
+        asb_topic_result = results[29] if not isinstance(results[29], BaseException) else []
+        # results[30] = namespace names (used as fallback — namespaces also
+        # appear in queue/topic FACET results, so parsing is already covered)
+        intel.azure_service_bus = _parse_asb_intelligence(
+            queue_rows=asb_queue_result,
+            topic_rows=asb_topic_result,
+        )
+    except Exception:
+        pass  # Non-Azure accounts silently get configured=False
 
     # ── Learn Naming Convention (feed ALL entity names) ──
     try:
