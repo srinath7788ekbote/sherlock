@@ -44,8 +44,55 @@ class DeepLinkBuilder:
     """
 
     def __init__(self, account_id: str, region: str) -> None:
-        self._account_id = account_id
+        self._account_id = str(account_id)
         self._base = _base(region)
+
+    # ── GUID helpers ───────────────────────────────────────────────
+
+    def _build_guid(self, entity_id: str) -> str:
+        """Build a base64-encoded NR entity GUID from an entity ID.
+
+        Format: ``{account_id}|APM|APPLICATION|{entity_id}``
+        """
+        raw = f"{self._account_id}|APM|APPLICATION|{entity_id}"
+        return base64.b64encode(raw.encode()).decode().rstrip("=")
+
+    # ── APM overview links ─────────────────────────────────────────
+
+    def apm_overview(
+        self,
+        entity_guid: str,
+        since_minutes: int | None = None,
+    ) -> str | None:
+        """Open the APM overview page for a service.
+
+        Uses the current ``nr1-core/apm/overview/{guid}`` path (NOT the
+        deprecated ``apm-features`` path).
+        """
+        try:
+            url = (
+                f"{self._base}/nr1-core/apm/overview/{entity_guid}"
+                f"?account={self._account_id}"
+            )
+            if since_minutes:
+                url += f"&duration={since_minutes * 60 * 1000}"
+            return url
+        except Exception:
+            return None
+
+    # ── Service map link ───────────────────────────────────────────
+
+    def service_map(self, entity_guid: str) -> str | None:
+        """Open the service map centred on an entity."""
+        try:
+            return (
+                f"{self._base}/nr1-core"
+                f"?account={self._account_id}"
+                f"&entity={entity_guid}"
+                f"&viz=service-map"
+            )
+        except Exception:
+            return None
 
     # ── NRQL / Query Builder links ─────────────────────────────────
 
@@ -170,6 +217,26 @@ class DeepLinkBuilder:
 
     # ── Kubernetes links ───────────────────────────────────────────
 
+    def k8s_cluster_explorer(
+        self,
+        cluster_name: str | None = None,
+    ) -> str | None:
+        """Open the K8s cluster explorer page.
+
+        Always includes ``account={account_id}`` so New Relic knows
+        which account to open.
+        """
+        try:
+            url = (
+                f"{self._base}/nr1-core/k8s-cluster-explorer"
+                f"?account={self._account_id}"
+            )
+            if cluster_name:
+                url += f"&clusterName={urllib.parse.quote(cluster_name, safe='')}"
+            return url
+        except Exception:
+            return None
+
     def k8s_explorer(self, namespace: str | None = None) -> str | None:
         """Open the K8s cluster explorer, optionally filtered."""
         try:
@@ -205,10 +272,22 @@ class DeepLinkBuilder:
 
     # ── Synthetic links ────────────────────────────────────────────
 
-    def synthetic_monitor(self, entity_guid: str) -> str | None:
-        """Open synthetic monitor detail page."""
+    def synthetic_monitor(
+        self,
+        monitor_guid: str,
+        monitor_name: str | None = None,
+    ) -> str | None:
+        """Open synthetic monitor detail page.
+
+        Uses the monitor GUID (entity GUID), **never** the display name.
+        The ``monitor_name`` parameter is accepted for documentation
+        purposes only and is intentionally ignored.
+        """
         try:
-            return self.entity_link(entity_guid)
+            return (
+                f"{self._base}/nr1-core/synthetics/monitors/{monitor_guid}"
+                f"?account={self._account_id}"
+            )
         except Exception:
             return None
 

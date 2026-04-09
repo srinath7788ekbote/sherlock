@@ -254,11 +254,13 @@ class TestSyntheticLinks:
         assert url is not None
         assert "result=" not in url
 
-    def test_synthetic_monitor_delegates_to_entity_link(self, builder_us):
+    def test_synthetic_monitor_uses_guid_in_path(self, builder_us):
         guid = "SYNTH-GUID-002"
-        url = builder_us.synthetic_monitor(guid)
-        expected = builder_us.entity_link(guid)
-        assert url == expected
+        url = builder_us.synthetic_monitor(monitor_guid=guid)
+        assert url is not None
+        assert guid in url
+        assert "/nr1-core/synthetics/monitors/" in url
+        assert "account=123456" in url
 
 
 # ── Alert tests ──────────────────────────────────────────────────────────
@@ -671,3 +673,135 @@ class TestAlertLinkInjection:
             # Closed incidents should NOT have deep_link.
             for inc in data.get("incidents", []):
                 assert "deep_link" not in inc
+
+
+# ── Regression tests for 6 deep link bugs ───────────────────────────────
+
+
+class TestBug1ApmPath:
+    """Bug 1: APM overview links must use 'apm' not 'apm-features'."""
+
+    def test_apm_overview_link_uses_correct_path(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.apm_overview(
+            entity_guid="MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        )
+        assert "/nr1-core/apm/" in url
+        assert "apm-features" not in url
+
+    def test_apm_overview_includes_account_id(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.apm_overview(
+            entity_guid="MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        )
+        assert "account=3007677" in url
+
+
+class TestBug2GuidEncoding:
+    """Bug 2: GUID must encode account_id|APM|APPLICATION|entity_id."""
+
+    def test_apm_guid_encoding_is_correct(self):
+        known_guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        decoded = base64.b64decode(known_guid + "==").decode()
+        parts = decoded.split("|")
+        assert len(parts) == 4
+        assert parts[1] == "APM"
+        assert parts[2] == "APPLICATION"
+
+    def test_build_guid_roundtrips_correctly(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        guid = builder._build_guid("170311250")
+        decoded = base64.b64decode(guid + "==").decode()
+        assert decoded == "3007677|APM|APPLICATION|170311250"
+
+
+class TestBug3K8sAccountId:
+    """Bug 3: K8s cluster explorer links must include account ID."""
+
+    def test_k8s_cluster_link_includes_account_id(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.k8s_cluster_explorer(
+            cluster_name="aks-eus2-prd-eswd-tngo"
+        )
+        assert "3007677" in url
+        assert "k8s-cluster-explorer" in url
+
+    def test_k8s_cluster_link_without_cluster_name(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.k8s_cluster_explorer()
+        assert "account=3007677" in url
+        assert "clusterName" not in url
+
+
+class TestBug4SyntheticGuid:
+    """Bug 4: Synthetic monitor links must use GUID, not display name."""
+
+    def test_synthetic_monitor_link_uses_guid_not_name(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.synthetic_monitor(
+            monitor_guid="abc123def456",
+            monitor_name="ESWD-PROD-Client-Service-Health",
+        )
+        assert "abc123def456" in url
+        assert "ESWD-PROD-Client-Service-Health" not in url
+        assert "3007677" in url
+
+    def test_synthetic_monitor_link_uses_correct_path(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.synthetic_monitor(monitor_guid="SYNTH-GUID-001")
+        assert "/nr1-core/synthetics/monitors/SYNTH-GUID-001" in url
+        assert "monitor-overview" not in url
+
+
+class TestBug5AccountIdStrCoercion:
+    """Bug 5: account_id must always be str to prevent digit truncation."""
+
+    def test_entity_guid_encodes_correct_account_id(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.service_map(
+            entity_guid=builder._build_guid("123456")
+        )
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        entity_param = params.get("entity", [""])[0]
+        decoded = base64.b64decode(entity_param + "==").decode()
+        assert decoded.startswith("3007677|"), (
+            f"Expected '3007677|...' but got '{decoded}'"
+        )
+
+    def test_int_account_id_is_coerced_to_str(self):
+        builder = DeepLinkBuilder(account_id=3007677, region="US")
+        url = builder.apm_overview(entity_guid="TEST")
+        assert "account=3007677" in url
+
+    def test_build_guid_with_int_account_id(self):
+        builder = DeepLinkBuilder(account_id=3007677, region="US")
+        guid = builder._build_guid("123456")
+        decoded = base64.b64decode(guid + "==").decode()
+        assert decoded.startswith("3007677|")
+
+
+class TestBug6DurationParam:
+    """Bug 6: APM links must use 'duration=' not 'time=' for time ranges."""
+
+    def test_apm_link_uses_duration_not_time_param(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.apm_overview(
+            entity_guid="MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ",
+            since_minutes=1440,
+        )
+        assert "duration=" in url
+        assert "time=last" not in url
+        assert "86400000" in url  # 24h in ms
+
+    def test_apm_link_without_time_defaults_to_no_duration(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.apm_overview(
+            entity_guid="MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        )
+        assert "duration=" not in url
+
+    def test_distributed_traces_uses_duration_ms(self):
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.distributed_traces("GUID-1", 30)
+        assert "duration=1800000" in url
+        assert "time=last" not in url
