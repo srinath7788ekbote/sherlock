@@ -33,6 +33,38 @@ mcp_sherlock_search_logs(service_name, severity="ERROR", since_minutes=60)
 **CRITICAL**: Check the `note` field in the response — it tells which attribute found data.
 Use that attribute for all subsequent NRQL. If 0 results with ERROR, retry without severity filter.
 
+### Step 1b — Infrastructure Log Fallback (when Step 1 returns zero)
+
+For Istio, K8s system, ingress, and other platform components:
+
+```sql
+-- Step 1: Discover namespaces
+SELECT uniques(namespace_name, 30)
+FROM Log
+WHERE cluster_name LIKE '%{cluster}%'
+SINCE 30 minutes ago LIMIT 1
+
+-- Step 2: Istio 5xx errors (if istio-system found)
+SELECT count(*) FROM Log
+WHERE namespace_name = 'istio-system'
+AND status >= 500
+SINCE {window} minutes ago
+TIMESERIES 5 minutes FACET vhost, status
+
+-- Step 3: Which backend is failing
+SELECT count(*) FROM Log
+WHERE namespace_name = 'istio-system'
+AND status >= 500
+SINCE {window} minutes ago
+FACET path, response_flags, response_code_details, upstream_cluster_raw
+LIMIT 20
+```
+
+**Key Istio log attributes (all structured — no message parsing needed):**
+`status`, `path`, `method`, `vhost`, `authority`, `host`,
+`response_flags`, `response_code_details`, `upstream_cluster_raw`,
+`upstream_host`, `requested_server_name`, `duration`
+
 ### Step 2 — Severity Distribution
 
 ```sql

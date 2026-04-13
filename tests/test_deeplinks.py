@@ -671,3 +671,68 @@ class TestAlertLinkInjection:
             # Closed incidents should NOT have deep_link.
             for inc in data.get("incidents", []):
                 assert "deep_link" not in inc
+
+
+# ── log_search_nrql tests ───────────────────────────────────────────────
+
+
+class TestLogSearchDeprecated:
+    """log_search() is deprecated — log_search_nrql() and nrql_chart() are preferred."""
+
+    def test_log_search_nrql_uses_query_builder(self):
+        """log_search_nrql() must produce a query-builder URL, not log-tailer."""
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.log_search_nrql(
+            service_name="tagging-service",
+            service_attribute="entity.name",
+            severity="ERROR",
+            keyword="HikariPool",
+            since_minutes=60,
+        )
+        assert url is not None
+        assert "data-exploration.query-builder" in url
+        assert "logger.log-tailer" not in url
+        assert "pane=" in url
+
+    def test_log_search_nrql_encodes_keyword_in_nrql(self):
+        """The keyword filter must appear in the base64-encoded NRQL."""
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.log_search_nrql(
+            service_name="tagging-service",
+            service_attribute="entity.name",
+            keyword="HikariPool",
+            since_minutes=60,
+        )
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = params.get("pane", [""])[0]
+        pane_json = base64.b64decode(pane_b64).decode()
+        assert "HikariPool" in pane_json
+
+    def test_log_search_nrql_encodes_dotted_attribute_correctly(self):
+        """entity.name attribute must be backtick-quoted in NRQL."""
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.log_search_nrql(
+            service_name="tagging-service",
+            service_attribute="entity.name",
+            since_minutes=60,
+        )
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = params.get("pane", [""])[0]
+        pane_json = base64.b64decode(pane_b64).decode()
+        # Must use backtick-quoted attribute name in NRQL
+        assert "`entity.name`" in pane_json
+
+    def test_log_search_deprecated_method_still_works(self):
+        """log_search() still returns a URL (backward compat) — just not preferred."""
+        builder = DeepLinkBuilder(account_id="3007677", region="US")
+        url = builder.log_search(
+            service_name="tagging-service",
+            service_attribute="entity.name",
+            severity="ERROR",
+            since_minutes=60,
+        )
+        # Method must still return a string (not None) for backward compat
+        assert url is not None
+        assert isinstance(url, str)

@@ -255,19 +255,41 @@ async def search_logs(
                 f" (primary '{intelligence.logs.service_attribute}' had no results)."
             )
 
-        # Deep links — only when errors were found.
-        if len(logs) > 0 and resolved_name:
+        # Deep links — only when logs were found.
+        if len(logs) > 0:
             try:
                 _builder = _get_deeplink_builder()
                 if _builder:
+                    # Use nrql_chart with the EXACT NRQL that found the logs.
+                    # This is reliable — Query Builder uses NRQL natively.
+                    # log_search() uses Lucene syntax which silently drops
+                    # dotted attributes (entity.name) and keyword filters.
                     response["links"] = {
-                        "view_in_nr": _builder.log_search(
-                            resolved_name, svc_attr, severity, since_minutes
-                        ),
-                        "error_logs": _builder.log_search(
-                            resolved_name, svc_attr, "ERROR", since_minutes
-                        ),
+                        "view_in_nr": _builder.nrql_chart(nrql, since_minutes),
                     }
+                    # If there are errors in the results, generate an error-only link
+                    has_errors = any(
+                        str(log.get(sev_attr, "")).upper() in ("ERROR", "FATAL", "CRITICAL")
+                        for log in logs
+                    )
+                    if has_errors:
+                        # Build a narrowed error NRQL from the working nrql
+                        error_nrql = nrql
+                        if sev_attr and f"{sev_attr}" in nrql:
+                            # Already filtered by severity — keep as-is
+                            pass
+                        else:
+                            # Insert error filter before SINCE clause
+                            since_pos = error_nrql.upper().find(" SINCE ")
+                            if since_pos > 0:
+                                error_nrql = (
+                                    error_nrql[:since_pos]
+                                    + f" AND `{sev_attr}` IN ('ERROR', 'FATAL', 'CRITICAL')"
+                                    + error_nrql[since_pos:]
+                                )
+                        response["links"]["error_logs"] = _builder.nrql_chart(
+                            error_nrql, since_minutes
+                        )
             except Exception:
                 pass
 

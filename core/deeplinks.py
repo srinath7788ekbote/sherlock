@@ -145,7 +145,17 @@ class DeepLinkBuilder:
         severity: str | None = None,
         since_minutes: int = 60,
     ) -> str | None:
-        """Open New Relic Logs filtered to a service."""
+        """[DEPRECATED] Open New Relic Logs filtered to a service via Lucene query.
+
+        KNOWN BUG: The logger.log-tailer nerdlet uses Lucene syntax. Attributes
+        containing dots (e.g. entity.name) are treated as nested fields and the
+        filter is silently dropped, returning the generic log page.
+
+        PREFER: Use nrql_chart(nrql, since_minutes) with the exact NRQL query
+        that found the logs. This is reliable across all attribute formats.
+
+        Kept for backward compatibility only.
+        """
         try:
             query = f"{service_attribute}:'{service_name}'"
             if severity:
@@ -240,6 +250,47 @@ class DeepLinkBuilder:
                 f"{NR_AIOPS_BASE}/accounts/{self._account_id}"
                 f"/incidents/{incident_id}/redirect"
             )
+        except Exception:
+            return None
+
+    # ── NRQL-based log links (preferred) ───────────────────────────
+
+    def log_search_nrql(
+        self,
+        service_name: str,
+        service_attribute: str,
+        severity: str | None = None,
+        keyword: str | None = None,
+        since_minutes: int = 60,
+        limit: int = 100,
+    ) -> str | None:
+        """Open New Relic Query Builder pre-loaded with a log search NRQL.
+
+        Preferred over log_search() — uses nrql_chart() which correctly handles
+        all attribute names including those containing dots (entity.name, etc.).
+
+        Args:
+            service_name: Service name to filter by (LIKE match).
+            service_attribute: Log attribute name (entity.name, appName, etc.).
+            severity: Optional severity filter (ERROR, WARN, etc.).
+            keyword: Optional keyword to search in message field.
+            since_minutes: Time window in minutes.
+            limit: Max rows (capped at 100 for readability).
+        """
+        try:
+            sev_attr = "level"  # default — caller should use discovered attr
+            nrql = (
+                f"SELECT timestamp, message, `{service_attribute}`, {sev_attr} "
+                f"FROM Log "
+                f"WHERE `{service_attribute}` LIKE '%{service_name}%'"
+            )
+            if severity:
+                levels = ", ".join(f"'{s.strip()}'" for s in severity.split(","))
+                nrql += f" AND `{sev_attr}` IN ({levels})"
+            if keyword:
+                nrql += f" AND message LIKE '%{keyword}%'"
+            nrql += f" SINCE {since_minutes} minutes ago ORDER BY timestamp DESC LIMIT {min(limit, 100)}"
+            return self.nrql_chart(nrql, since_minutes)
         except Exception:
             return None
 

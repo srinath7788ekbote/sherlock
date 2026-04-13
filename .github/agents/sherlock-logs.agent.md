@@ -123,6 +123,87 @@ LOGS_RESULT: {
 }
 ```
 
+### Step 0c — Infrastructure Namespace Log Search (runs when Step 0b also returns zero)
+
+For infrastructure/platform components (Istio, K8s system, ingress controllers,
+etc.), logs are tagged by `namespace_name` and `cluster_name` — NOT by any
+APM service attribute. `search_logs` cannot find these logs.
+
+**When to trigger:** The investigated alert mentions Istio, ingress, K8s system,
+nginx, envoy, or any platform component; OR `search_logs` returns zero after
+Steps 0b/0c exhausted all service attribute fallbacks.
+
+**Step 1 — Discover what log namespaces exist in the cluster:**
+```nrql
+SELECT uniques(namespace_name, 30), uniques(cluster_name, 10)
+FROM Log
+WHERE cluster_name LIKE '%{cluster_bare_name}%'
+SINCE 30 minutes ago
+LIMIT 1
+```
+Where `{cluster_bare_name}` is derived from:
+- `learn_account` response → `k8s.cluster_names[0]`
+- Or from the alert target (e.g. `aks-eus2-prd-eswd-tngo`)
+
+**Step 2 — If `istio-system` namespace found, query Istio access logs:**
+```nrql
+SELECT count(*) FROM Log
+WHERE namespace_name = 'istio-system'
+AND status >= 500
+SINCE {since_minutes} minutes ago
+TIMESERIES 5 minutes
+FACET vhost, status
+```
+
+**Step 3 — Get structured Istio error details:**
+```nrql
+SELECT count(*) FROM Log
+WHERE namespace_name = 'istio-system'
+AND status >= 500
+SINCE {since_minutes} minutes ago
+FACET path, response_flags, response_code_details, upstream_cluster_raw
+LIMIT 20
+```
+
+**Step 4 — Interpret Istio response_flags and response_code_details:**
+
+| `response_flags` | Meaning |
+|-----------------|--------|
+| `-` | No Envoy issue — 500 from app code (`via_upstream`) |
+| `UH` | No healthy upstream — all backends down |
+| `UC` | Upstream connection failure |
+| `UF` | Upstream connection timeout |
+| `NR` | No route configured |
+
+| `response_code_details` | Meaning |
+|------------------------|--------|
+| `via_upstream` | 500 came from the app, not from Istio |
+| `upstream_reset_before_response_started` | Backend crashed mid-request |
+| `stream_idle_timeout` | Upstream took too long |
+
+**Step 5 — Find the affected service by upstream_cluster:**
+```nrql
+SELECT count(*) FROM Log
+WHERE namespace_name = 'istio-system'
+AND status >= 500
+SINCE {since_minutes} minutes ago
+FACET upstream_cluster_raw, vhost
+LIMIT 10
+```
+The `upstream_cluster_raw` value (e.g. `tagging-service.eswd-prod|http|80`)
+identifies which backend service is actually failing.
+
+**Reporting format when infrastructure logs found:**
+```
+Logs — 🔴 Istio access logs found (namespace: istio-system)
+  {N} errors in {window} minutes
+  response_flags: '-' (via_upstream) — 500 from app, not Istio
+  upstream_cluster: tagging-service.eswd-prod — ORIGIN service
+  [View Istio errors](nrql_chart link)
+```
+
+**Only declare NO_DATA** if namespace discovery query also returns zero.
+
 ### Step 1 — Search Logs (MANDATORY FIRST)
 
 ```
@@ -135,6 +216,13 @@ mcp_sherlock_search_logs(service_name="{service}", severity="ERROR", since_minut
 - If the `note` says `entity.name`, use `` `entity.name` `` (with backticks) in NRQL
 
 **If search_logs returns 0 logs, also try without severity filter** before concluding NO_DATA.
+
+**Pass to Team Lead:** When logs are found, always include:
+```
+LOGS_NRQL: "{the exact nrql_used from search_logs response}"
+LOGS_SOURCE: "service_attribute={attr}" OR "namespace_name=istio-system" OR "cluster_name={cluster}"
+```
+This lets the Team Lead generate accurate deep links using `nrql_chart`.
 
 ### Step 2 — Severity Distribution (NRQL)
 

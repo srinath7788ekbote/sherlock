@@ -234,3 +234,89 @@ class TestSearchLogs:
         result = await search_logs("eswd-prod/client-service")
         parsed = json.loads(result)
         assert parsed["total_logs"] == 1
+
+
+class TestLogDeepLink:
+    """Verify search_logs generates NRQL-based deep links, not Lucene links."""
+
+    @pytest.mark.asyncio
+    async def test_search_logs_link_uses_nrql_chart_not_log_tailer(
+        self, logs_context
+    ):
+        """Deep link must open Query Builder, not logger.log-tailer."""
+        import respx
+
+        log_data = _mock_nrql_response([
+            {
+                "timestamp": 1700000000000,
+                "message": "HikariPool-1 - Connection is not available",
+                "entity.name": "eswd-prod/tagging-service",
+                "level": "ERROR",
+            }
+        ])
+
+        with respx.mock(assert_all_called=False) as router:
+            router.post("https://api.newrelic.com/graphql").mock(
+                return_value=httpx.Response(200, json=log_data)
+            )
+
+            result = await search_logs(
+                service_name="web-api",
+                severity="ERROR",
+                since_minutes=60,
+            )
+        data = json.loads(result)
+
+        # Assert: link must use query-builder, not log-tailer
+        assert "links" in data, "No links in response"
+        view_link = data["links"].get("view_in_nr", "")
+        assert "data-exploration.query-builder" in view_link, (
+            f"Expected query-builder link, got: {view_link}"
+        )
+        assert "logger.log-tailer" not in view_link, (
+            f"Must not use deprecated log-tailer: {view_link}"
+        )
+        # Must be a valid base64-encoded pane
+        assert "pane=" in view_link
+
+    @pytest.mark.asyncio
+    async def test_search_logs_link_includes_keyword_filter(
+        self, logs_context
+    ):
+        """Deep link NRQL must include keyword filter when keyword was used."""
+        import base64
+        import urllib.parse
+
+        import respx
+
+        log_data = _mock_nrql_response([
+            {
+                "timestamp": 1700000000000,
+                "message": "HikariPool timeout error",
+                "entity.name": "eswd-prod/tagging-service",
+                "level": "ERROR",
+            }
+        ])
+
+        with respx.mock(assert_all_called=False) as router:
+            router.post("https://api.newrelic.com/graphql").mock(
+                return_value=httpx.Response(200, json=log_data)
+            )
+
+            result = await search_logs(
+                service_name="web-api",
+                keyword="HikariPool",
+                since_minutes=60,
+            )
+        data = json.loads(result)
+        view_link = data.get("links", {}).get("view_in_nr", "")
+
+        # Decode the pane parameter to verify NRQL content
+        parsed = urllib.parse.urlparse(view_link)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = params.get("pane", [""])[0]
+        if pane_b64:
+            pane_json = base64.b64decode(pane_b64).decode()
+            assert "HikariPool" in pane_json, (
+                f"Keyword 'HikariPool' must appear in NRQL pane: {pane_json}"
+            )

@@ -31,6 +31,9 @@ ALL applicable fallbacks are exhausted.
 | `FROM Log WHERE entity.name = '{service}'` | `FROM Log WHERE service.name = '{service}'` |
 | `FROM Log WHERE service.name = '{service}'` | `FROM Log WHERE message LIKE '%{bare_name}%'` |
 | `FROM Log WHERE appName = '{service}'` | `FROM Log WHERE entity.name = '{service}'` |
+| `search_logs` returns zero for Istio/ingress/K8s system service | These are infrastructure logs, not APM service logs. Try: `SELECT uniques(namespace_name) FROM Log WHERE cluster_name LIKE '%{cluster}%' SINCE 30 minutes ago LIMIT 1` to discover namespaces, then query by `namespace_name = 'istio-system'` |
+| `search_logs` returns zero and service is platform-level (no APM entity) | Run namespace discovery — platform logs are tagged by `namespace_name` and `cluster_name`, not `entity.name` or `appName` |
+| Istio 5xx alert but no logs found for the domain name | Do NOT search by domain name. Search by `namespace_name = 'istio-system'` and filter by `status >= 500` |
 
 **Infrastructure:**
 | If this returns zero | Try this instead |
