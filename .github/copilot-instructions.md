@@ -275,7 +275,15 @@ NO_DATA domains get one line in the status table only.
 
 ### APM — 🟡 WARNING
 - **Error spike**: 364×503 at 08:30-09:30 UTC on `/healthcheck` — [View error chart](url)
+  ```sql
+  SELECT percentage(count(*), WHERE error IS true) FROM Transaction
+  WHERE appName='eswd-prod/client-service' TIMESERIES 5 minutes SINCE 24 hours ago
+  ```
 - **Top errors**: 380×503, 11×400 — [View errors inbox](url)
+  ```sql
+  SELECT count(*) FROM TransactionError WHERE appName='eswd-prod/client-service'
+  FACET `http.statusCode`, errorClass SINCE 24 hours ago LIMIT 10
+  ```
 
 ### K8s — 🟢 HEALTHY
 2/2 pods, 0 restarts, CPU <1%, mem 13% — [View K8s workload](url)
@@ -291,15 +299,31 @@ NO_DATA domains get one line in the status table only.
 | 3 | Add error rate alert | 92% spike unnotified | [Create alert](url) |
 ```
 
+### Finding Format Rules (MANDATORY)
+
+Every finding in the detail sections MUST follow this pattern:
+
+1. **Deep link**: Each finding line ends with a clickable `[View …](url)` link
+2. **NRQL block**: If the finding was produced by a NRQL query, include the
+   exact query in a fenced `sql` code block immediately below the finding line.
+   This lets the engineer copy-paste the query into New Relic for further drill-down.
+3. **Link + NRQL together**: The deep link should open the NRQL chart in New Relic
+   with the query pre-loaded (using `nrql_chart()` / `spike_chart()`).
+4. **Non-NRQL findings** (e.g., K8s pod status, dependency maps) get a deep link
+   but no NRQL block — the link points to the appropriate NR1 page instead.
+5. **Recommendations table**: Each row's Link column should be a `[View NRQL](url)`
+   that opens the relevant query in the query builder.
+
 ### Report Size Rules
 
 | Service State | Expected Report Size |
 |--------------|---------------------|
 | HEALTHY (all domains green) | ~15 lines: status table + "All healthy" |
-| WARNING (1-2 domains) | ~30-40 lines: status table + finding sections for issues |
-| CRITICAL (multiple domains) | ~50-60 lines: status table + timeline + all issue sections |
+| WARNING (1-2 domains) | ~40-50 lines: status table + findings with NRQL blocks |
+| CRITICAL (multiple domains) | ~60-80 lines: status table + timeline + all findings with NRQL |
 
-**NEVER output a 200+ line report. Keep it scannable.**
+**NEVER output a 300+ line report. Keep it scannable.**
+**NRQL blocks are exempt from the size limit — they are essential for drill-down.**
 
 ---
 

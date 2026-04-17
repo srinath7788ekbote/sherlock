@@ -900,6 +900,7 @@ def _inject_finding_deep_links(
                             f"FROM Transaction WHERE appName='{service}' "
                             f"TIMESERIES 5 minutes SINCE {since} minutes ago"
                         )
+                        finding["_nrql"] = nrql
                         link = builder.spike_chart(nrql, since)
                     elif "error_classes" in signal:
                         if entity_guid:
@@ -910,6 +911,7 @@ def _inject_finding_deep_links(
                                 f"WHERE appName='{service}' FACET errorClass "
                                 f"SINCE {since} minutes ago LIMIT 10"
                             )
+                            finding["_nrql"] = nrql
                             link = builder.nrql_chart(nrql, since)
                     elif "slow_queries" in signal:
                         nrql = (
@@ -918,6 +920,7 @@ def _inject_finding_deep_links(
                             f"FACET datastoreType, table "
                             f"SINCE {since} minutes ago"
                         )
+                        finding["_nrql"] = nrql
                         link = builder.nrql_chart(nrql, since)
                     elif "external_calls" in signal:
                         if entity_guid:
@@ -980,8 +983,13 @@ def _inject_finding_deep_links(
                 if link:
                     finding["deep_link"] = link
 
-                # Clean up internal keys before output.
-                finding.pop("_nrql", None)
+                # Promote internal _nrql to output-visible "nrql" key so
+                # the report template can render a copyable SQL block.
+                internal_nrql = finding.pop("_nrql", None)
+                if internal_nrql:
+                    finding["nrql"] = internal_nrql
+
+                # Clean up other internal keys before output.
                 finding.pop("_dep_service", None)
             except Exception:
                 continue

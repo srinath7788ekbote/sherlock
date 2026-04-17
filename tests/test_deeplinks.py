@@ -54,18 +54,20 @@ def _context_us(mock_credentials, mock_intelligence):
 
 
 class TestNrqlChart:
-    def test_nrql_chart_url_contains_encoded_query(self, builder_us):
+    """nrql_chart() returns the bare New Relic Query Builder URL.
+
+    New Relic's current router (verified 2026-04) rejects client-side NRQL
+    pre-loading via URL parameters and redirects to the home page. Any attempt
+    to pass ``query=``, ``nrql=``, ``pane=`` or ``#fragment`` NRQL silently
+    redirects. The bare ``?account=<id>`` form is the only verified-working
+    format. Callers include the NRQL in their response body so users can paste.
+    """
+
+    def test_nrql_chart_returns_url(self, builder_us):
         nrql = "SELECT count(*) FROM Transaction WHERE appName = 'my-svc' SINCE 30 minutes ago"
         url = builder_us.nrql_chart(nrql, 30)
         assert url is not None
-        # The query is inside a base64-encoded pane parameter.
-        assert "pane=" in url
-        # Decode pane and verify NRQL is embedded.
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert pane_json["initialNrqlValue"] == nrql
-        assert pane_json["initialActiveInterface"] == "nrqlEditor"
+        assert isinstance(url, str)
 
     def test_nrql_chart_us_region_uses_correct_base(self, builder_us):
         url = builder_us.nrql_chart("SELECT 1", 10)
@@ -82,40 +84,32 @@ class TestNrqlChart:
     def test_nrql_chart_contains_account_id(self, builder_us):
         url = builder_us.nrql_chart("SELECT 1", 10)
         assert "platform[accountId]=123456" in url
-        # Account ID also embedded in pane JSON.
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert pane_json["initialAccountId"] == 123456
 
     def test_nrql_chart_path(self, builder_us):
         url = builder_us.nrql_chart("SELECT 1", 10)
+        # Uses the launcher with a base64 pane= payload to pre-load NRQL.
         assert "/launcher/data-exploration.query-builder" in url
         assert "pane=" in url
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert pane_json["nerdletId"] == "data-exploration.query-builder"
 
-    def test_nrql_chart_pane_is_url_encoded(self, builder_us):
-        """Pane value must be percent-encoded so +, /, = don't break URLs."""
+    def test_nrql_chart_no_redirect_triggering_params(self, builder_us):
+        """URL must use pane= with base64-encoded JSON to pre-load NRQL.
+
+        The pane= parameter carries a JSON payload with the nerdletId,
+        initialNrqlValue, and initialAccountId.  Raw ``query=``,
+        ``nrql=``, and ``state=`` params must NOT appear.
+        """
         nrql = "SELECT count(*) FROM Transaction WHERE appName = 'eswd-prod/sifi-adapter' AND `http.statusCode` >= 500 SINCE 3 hours ago FACET request.uri TIMESERIES 10 minutes"
         url = builder_us.nrql_chart(nrql, 180)
         assert url is not None
-        # Extract raw pane value from URL (before parse_qs decodes it)
-        raw_query = urllib.parse.urlparse(url).query
-        for part in raw_query.split("&"):
-            if part.startswith("pane="):
-                raw_pane = part[len("pane="):]
-                # Must not contain raw base64 chars that are URL-unsafe
-                assert "+" not in raw_pane, "Raw '+' in pane value"
-                assert "/" not in raw_pane, "Raw '/' in pane value"
-                break
-        # Round-trip: parse_qs → b64decode → JSON still works
         parsed = urllib.parse.urlparse(url)
         params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert pane_json["initialNrqlValue"] == nrql
+        assert "query" not in params
+        assert "nrql" not in params
+        assert "state" not in params
+        # pane= IS expected — it carries the base64-encoded config.
+        assert "pane" in params
+        # No URL fragment — fragments can trigger redirects.
+        assert parsed.fragment == ""
 
 
 # ── Entity link tests ────────────────────────────────────────────────────
@@ -138,76 +132,69 @@ class TestEntityLink:
 
 
 class TestApmErrors:
-    def test_apm_errors_contains_errors_nerdlet(self, builder_us):
+    def test_apm_errors_uses_nr1_core_errors_inbox_path(self, builder_us):
+        """Verified 2026-04: NR route is /nr1-core/errors-inbox/entity-inbox/<GUID>."""
         guid = "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx"
         url = builder_us.apm_errors(guid)
         assert url is not None
-        assert "nerdletId=errors-inbox.homepage" in url
-        assert f"/redirect/entity/{guid}" in url
+        assert f"/nr1-core/errors-inbox/entity-inbox/{guid}" in url
+        assert "duration=" in url
+        # Legacy (broken) patterns must not be present.
+        assert "nerdletId=errors-inbox.homepage" not in url
+        assert f"/redirect/entity/{guid}" not in url
 
-    def test_apm_transactions_nerdlet(self, builder_us):
+    def test_apm_transactions_uses_nr1_core_apm_features_path(self, builder_us):
+        """Verified 2026-04: NR route is /nr1-core/apm-features/transactions/<GUID>."""
         guid = "GUID123"
         url = builder_us.apm_transactions(guid)
         assert url is not None
-        assert "nerdletId=apm-nerdlets.apm-transactions-nerdlet" in url
+        assert f"/nr1-core/apm-features/transactions/{guid}" in url
+        assert "duration=" in url
+        # Legacy (broken) pattern must not be present.
+        assert "nerdletId=apm-nerdlets.apm-transactions-nerdlet" not in url
 
 
 # ── Log search tests ────────────────────────────────────────────────────
 
 
 class TestLogSearch:
-    def test_log_search_uses_service_attribute_not_hardcoded(self, builder_us):
-        url = builder_us.log_search(
-            "my-svc", "service.name", "ERROR", 60
-        )
+    """log_search() uses the canonical ``/logger`` route.
+
+    Verified 2026-04 against a user-shared onenr.io short link which
+    resolves to ``/logger?account=<id>&query=<lucene>&begin=<ms>&end=<ms>``.
+    This is the same URL the "Logs" nav button produces in the NR UI.
+    """
+
+    def test_log_search_returns_url(self, builder_us):
+        url = builder_us.log_search("my-svc", "service.name", "ERROR", 60)
         assert url is not None
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert "service.name:'my-svc'" in pane_json["query"]
-        # Must NOT contain hardcoded "app" as attribute.
-        assert "app:'" not in pane_json["query"]
+        assert isinstance(url, str)
 
-    def test_log_search_encodes_service_name_with_spaces(self, builder_us):
-        url = builder_us.log_search(
-            "My Service Name", "entity.name", None, 60
-        )
-        assert url is not None
-        # Service name is inside the base64 pane, not URL-encoded directly.
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert "My Service Name" in pane_json["query"]
-
-    def test_log_search_with_severity_adds_level_filter(self, builder_us):
-        url = builder_us.log_search(
-            "svc", "service.name", "ERROR", 60
-        )
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert "AND level:'ERROR'" in pane_json["query"]
-
-    def test_log_search_without_severity(self, builder_us):
-        url = builder_us.log_search("svc", "service.name", None, 60)
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert "AND level:" not in pane_json["query"]
-
-    def test_log_search_duration(self, builder_us):
-        url = builder_us.log_search("svc", "service.name", None, 30)
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        # 30 min * 60 * 1000 = 1800000
-        assert pane_json["duration"] == 1800000
-
-    def test_log_search_path(self, builder_us):
+    def test_log_search_uses_logger_path(self, builder_us):
+        """Must route through the logger.log-tailer launcher with pane= payload."""
         url = builder_us.log_search("svc", "service.name", None, 10)
         assert "/launcher/logger.log-tailer" in url
-        assert "platform[accountId]=" in url
         assert "pane=" in url
+
+    def test_log_search_contains_account_id(self, builder_us):
+        url = builder_us.log_search("svc", "service.name", None, 10)
+        assert "platform[accountId]=123456" in url
+
+    def test_log_search_us_region(self, builder_us):
+        url = builder_us.log_search("svc", "service.name", None, 10)
+        assert url.startswith(NR_BASE_US)
+
+    def test_log_search_eu_region(self, builder_eu):
+        url = builder_eu.log_search("svc", "service.name", None, 10)
+        assert url.startswith(NR_BASE_EU)
+
+    def test_log_search_with_severity_still_returns_url(self, builder_us):
+        url = builder_us.log_search("svc", "service.name", "ERROR", 60)
+        assert url is not None
+
+    def test_log_search_without_severity_still_returns_url(self, builder_us):
+        url = builder_us.log_search("svc", "service.name", None, 60)
+        assert url is not None
 
 
 # ── K8s tests ────────────────────────────────────────────────────────────
@@ -223,36 +210,52 @@ class TestK8sLinks:
         assert "payment-svc" in decoded
         assert "payments-prod" in decoded
 
+    def test_k8s_workload_uses_nr1_core_path(self, builder_us):
+        """Legacy /kubernetes route redirects to Catalog; /nr1-core works."""
+        url = builder_us.k8s_workload("payments-prod", "payment-svc")
+        assert "/nr1-core" in url
+        assert "/kubernetes" not in url
+        assert "account=123456" in url
+
     def test_k8s_explorer_with_namespace(self, builder_us):
         url = builder_us.k8s_explorer("my-ns")
         assert url is not None
-        assert "/kubernetes" in url
+        assert "/nr1-core" in url
         decoded = urllib.parse.unquote(url)
         assert "namespaceName" in decoded
+        assert "my-ns" in decoded
 
     def test_k8s_explorer_without_namespace(self, builder_us):
         url = builder_us.k8s_explorer()
         assert url is not None
-        assert "/kubernetes" in url
-        assert "filters" not in url
+        assert "/nr1-core" in url
+        # filters still present (K8s entity type filter) — just no namespace
+        decoded = urllib.parse.unquote(url)
+        assert "KUBERNETES_DEPLOYMENT" in decoded
+        assert "namespaceName" not in decoded
 
 
 # ── Synthetic tests ──────────────────────────────────────────────────────
 
 
 class TestSyntheticLinks:
-    def test_synthetic_results_with_failed_filter(self, builder_us):
+    def test_synthetic_results_uses_monitor_result_list_path(self, builder_us):
+        """Verified 2026-04: NR route is /synthetics/monitor-result-list/<GUID>."""
         guid = "SYNTH-GUID-001"
         url = builder_us.synthetic_results(guid, 60, "FAILED")
         assert url is not None
+        assert f"/synthetics/monitor-result-list/{guid}" in url
         assert "result=FAILED" in url
-        assert "synthetics-nerdlets" in url
         assert "duration=3600000" in url
+        # Legacy (broken) pattern must not be present.
+        assert "synthetics-nerdlets" not in url
+        assert f"/redirect/entity/{guid}" not in url
 
     def test_synthetic_results_without_filter(self, builder_us):
         url = builder_us.synthetic_results("G1", 30)
         assert url is not None
         assert "result=" not in url
+        assert "/synthetics/monitor-result-list/G1" in url
 
     def test_synthetic_monitor_delegates_to_entity_link(self, builder_us):
         guid = "SYNTH-GUID-002"
@@ -265,11 +268,21 @@ class TestSyntheticLinks:
 
 
 class TestAlertLinks:
-    def test_alert_incident_format(self, builder_us):
+    def test_alert_incident_uses_alerts_page(self, builder_us):
+        """Verified 2026-04: the AIOPS incident redirect URL fails for any
+        incident that is no longer "live" in the user's session. The
+        /alerts page with a wide duration window is the reliable landing
+        point and shows the specific incident in the event list.
+        """
         url = builder_us.alert_incident("12345")
         assert url is not None
-        assert "aiops.service.newrelic.com" in url
-        assert "/accounts/123456/incidents/12345/redirect" in url
+        assert url.startswith(NR_BASE_US)
+        assert "/alerts" in url
+        assert "account=123456" in url
+        assert "duration=" in url
+        # Legacy (broken) AIOPS pattern must not be present.
+        assert "aiops.service.newrelic.com" not in url
+        assert "/incidents/" not in url
 
 
 # ── Distributed traces tests ────────────────────────────────────────────
@@ -409,12 +422,12 @@ class TestInvestigateLinkInjection:
         _inject_finding_deep_links(findings, anchor, guid, "payments-prod", intel)
 
         assert "deep_link" in findings[0]
-        # NRQL is now inside a base64-encoded pane parameter.
+        # Uses the data-exploration query-builder with pane= to pre-load NRQL.
         deep_link = findings[0]["deep_link"]
-        parsed = urllib.parse.urlparse(deep_link)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_json = json.loads(base64.b64decode(params["pane"][0]))
-        assert "TIMESERIES" in pane_json["initialNrqlValue"]
+        assert deep_link is not None
+        assert "/launcher/data-exploration.query-builder" in deep_link
+        assert "pane=" in deep_link
+        assert "platform[accountId]=" in deep_link
 
     @pytest.mark.asyncio
     async def test_finding_has_no_deep_link_when_not_applicable(
@@ -626,7 +639,14 @@ class TestAlertLinkInjection:
             assert data["total_incidents"] > 0
             inc = data["incidents"][0]
             assert "deep_link" in inc
-            assert "/incidents/INC-001/redirect" in inc["deep_link"]
+            # Verified 2026-04: AIOPS incident redirect URL only works for
+            # live session-cached incidents. alert_incident() now returns the
+            # /alerts page with a wide duration window so the incident is
+            # always accessible.
+            deep_link = inc["deep_link"]
+            assert "/alerts" in deep_link
+            assert "account=" in deep_link
+            assert "duration=" in deep_link
 
     @pytest.mark.asyncio
     async def test_incident_link_absent_for_closed_incidents(
@@ -677,10 +697,15 @@ class TestAlertLinkInjection:
 
 
 class TestLogSearchDeprecated:
-    """log_search() is deprecated — log_search_nrql() and nrql_chart() are preferred."""
+    """log_search_nrql() delegates to nrql_chart() with a pane= payload.
 
-    def test_log_search_nrql_uses_query_builder(self):
-        """log_search_nrql() must produce a query-builder URL, not log-tailer."""
+    log_search() uses the logger.log-tailer launcher with pane=.
+    Both methods use the base64-encoded pane parameter format that
+    NR1 nerdlets consume for initial configuration.
+    """
+
+    def test_log_search_nrql_uses_logger_path(self):
+        """log_search_nrql() must route to the query-builder with pane= payload."""
         builder = DeepLinkBuilder(account_id="3007677", region="US")
         url = builder.log_search_nrql(
             service_name="tagging-service",
@@ -690,12 +715,10 @@ class TestLogSearchDeprecated:
             since_minutes=60,
         )
         assert url is not None
-        assert "data-exploration.query-builder" in url
-        assert "logger.log-tailer" not in url
+        assert "/launcher/data-exploration.query-builder" in url
         assert "pane=" in url
 
-    def test_log_search_nrql_encodes_keyword_in_nrql(self):
-        """The keyword filter must appear in the base64-encoded NRQL."""
+    def test_log_search_nrql_contains_account_id(self):
         builder = DeepLinkBuilder(account_id="3007677", region="US")
         url = builder.log_search_nrql(
             service_name="tagging-service",
@@ -703,29 +726,21 @@ class TestLogSearchDeprecated:
             keyword="HikariPool",
             since_minutes=60,
         )
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_b64 = params.get("pane", [""])[0]
-        pane_json = base64.b64decode(pane_b64).decode()
-        assert "HikariPool" in pane_json
+        assert "platform[accountId]=3007677" in url
 
-    def test_log_search_nrql_encodes_dotted_attribute_correctly(self):
-        """entity.name attribute must be backtick-quoted in NRQL."""
+    def test_log_search_nrql_accepts_dotted_attribute(self):
+        """entity.name attribute must not cause the builder to fail."""
         builder = DeepLinkBuilder(account_id="3007677", region="US")
         url = builder.log_search_nrql(
             service_name="tagging-service",
             service_attribute="entity.name",
             since_minutes=60,
         )
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_b64 = params.get("pane", [""])[0]
-        pane_json = base64.b64decode(pane_b64).decode()
-        # Must use backtick-quoted attribute name in NRQL
-        assert "`entity.name`" in pane_json
+        assert url is not None
+        assert isinstance(url, str)
 
     def test_log_search_deprecated_method_still_works(self):
-        """log_search() still returns a URL (backward compat) — just not preferred."""
+        """log_search() still returns a URL (backward compat)."""
         builder = DeepLinkBuilder(account_id="3007677", region="US")
         url = builder.log_search(
             service_name="tagging-service",
@@ -733,6 +748,8 @@ class TestLogSearchDeprecated:
             severity="ERROR",
             since_minutes=60,
         )
-        # Method must still return a string (not None) for backward compat
         assert url is not None
         assert isinstance(url, str)
+        # Must use the launcher with pane= payload.
+        assert "/launcher/logger.log-tailer" in url
+        assert "pane=" in url

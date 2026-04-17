@@ -384,6 +384,11 @@ async def get_service_golden_signals(
                     "latency_chart": _builder.nrql_chart(_p95_nrql, since_minutes),
                     "throughput_chart": _builder.nrql_chart(_tput_nrql, since_minutes),
                 }
+                response["nrql"] = {
+                    "error_rate": _err_nrql,
+                    "latency_p95": _p95_nrql,
+                    "throughput": _tput_nrql,
+                }
         except Exception:
             pass
 

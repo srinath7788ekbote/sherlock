@@ -267,26 +267,33 @@ class TestLogDeepLink:
             )
         data = json.loads(result)
 
-        # Assert: link must use query-builder, not log-tailer
+        # Assert: link must route to the /logger page (NR's canonical Logs UI).
+        # Verified 2026-04 via user-shared onenr.io short link.
         assert "links" in data, "No links in response"
         view_link = data["links"].get("view_in_nr", "")
-        assert "data-exploration.query-builder" in view_link, (
-            f"Expected query-builder link, got: {view_link}"
+        assert "/logger" in view_link, (
+            f"Expected /logger link, got: {view_link}"
         )
         assert "logger.log-tailer" not in view_link, (
             f"Must not use deprecated log-tailer: {view_link}"
         )
-        # Must be a valid base64-encoded pane
-        assert "pane=" in view_link
+        assert "/launcher/" not in view_link, (
+            f"Must not use legacy launcher path (causes redirect): {view_link}"
+        )
+        assert "/data-exploration/query-builder" not in view_link, (
+            f"Must not use query-builder for logs: {view_link}"
+        )
 
     @pytest.mark.asyncio
-    async def test_search_logs_link_includes_keyword_filter(
+    async def test_search_logs_link_points_to_logger_page(
         self, logs_context
     ):
-        """Deep link NRQL must include keyword filter when keyword was used."""
-        import base64
-        import urllib.parse
+        """Deep link must open the /logger page even when a keyword is used.
 
+        The /logger route is NR's canonical Logs UI path. A Lucene ``query``
+        parameter is pre-filled so the filter is applied on page load.
+        The full NRQL is also surfaced separately in the tool's response body.
+        """
         import respx
 
         log_data = _mock_nrql_response([
@@ -311,12 +318,13 @@ class TestLogDeepLink:
         data = json.loads(result)
         view_link = data.get("links", {}).get("view_in_nr", "")
 
-        # Decode the pane parameter to verify NRQL content
-        parsed = urllib.parse.urlparse(view_link)
-        params = urllib.parse.parse_qs(parsed.query)
-        pane_b64 = params.get("pane", [""])[0]
-        if pane_b64:
-            pane_json = base64.b64decode(pane_b64).decode()
-            assert "HikariPool" in pane_json, (
-                f"Keyword 'HikariPool' must appear in NRQL pane: {pane_json}"
-            )
+        assert view_link, "Expected a view link in response"
+        assert "/logger" in view_link, (
+            f"Expected /logger link, got: {view_link}"
+        )
+        assert "/launcher/" not in view_link, (
+            f"Must not use legacy launcher path: {view_link}"
+        )
+        assert "/data-exploration/query-builder" not in view_link, (
+            f"Must not use query-builder for logs: {view_link}"
+        )

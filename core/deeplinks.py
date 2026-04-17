@@ -44,8 +44,54 @@ class DeepLinkBuilder:
     """
 
     def __init__(self, account_id: str, region: str) -> None:
-        self._account_id = account_id
+        self._account_id = str(account_id)
         self._base = _base(region)
+
+    # ── GUID helpers ───────────────────────────────────────────────
+
+    def _build_guid(self, entity_id: str) -> str:
+        """Build a base64-encoded NR entity GUID from an entity ID.
+
+        Format: ``{account_id}|APM|APPLICATION|{entity_id}``
+        """
+        raw = f"{self._account_id}|APM|APPLICATION|{entity_id}"
+        return base64.b64encode(raw.encode()).decode().rstrip("=")
+
+    # ── APM overview links ─────────────────────────────────────────
+
+    def apm_overview(
+        self,
+        entity_guid: str,
+        since_minutes: int | None = None,
+    ) -> str | None:
+        """Open the APM overview page for a service.
+
+        Uses the current ``nr1-core/apm/overview/{guid}`` path.
+        """
+        try:
+            url = (
+                f"{self._base}/nr1-core/apm/overview/{entity_guid}"
+                f"?account={self._account_id}"
+            )
+            if since_minutes:
+                url += f"&duration={since_minutes * 60 * 1000}"
+            return url
+        except Exception:
+            return None
+
+    # ── Service map link ───────────────────────────────────────────
+
+    def service_map(self, entity_guid: str) -> str | None:
+        """Open the service map centred on an entity."""
+        try:
+            return (
+                f"{self._base}/nr1-core"
+                f"?account={self._account_id}"
+                f"&entity={entity_guid}"
+                f"&viz=service-map"
+            )
+        except Exception:
+            return None
 
     # ── NRQL / Query Builder links ─────────────────────────────────
 
@@ -94,22 +140,39 @@ class DeepLinkBuilder:
         except Exception:
             return None
 
-    def apm_errors(self, entity_guid: str) -> str | None:
-        """Open error inbox / error analysis for an APM service."""
+    def apm_errors(
+        self, entity_guid: str, since_minutes: int = 30
+    ) -> str | None:
+        """Open the errors inbox for an APM service.
+
+        Verified 2026-04: the correct NR1 route is
+        ``/nr1-core/errors-inbox/entity-inbox/<GUID>``. The old
+        ``?nerdletId=errors-inbox.homepage`` redirect URL silently lands
+        on the APM summary page instead of the errors inbox.
+        """
         try:
             return (
-                f"{self._base}/redirect/entity/{entity_guid}"
-                f"?nerdletId=errors-inbox.homepage"
+                f"{self._base}/nr1-core/errors-inbox/entity-inbox/{entity_guid}"
+                f"?duration={since_minutes * 60 * 1000}"
+                f"&filters=selectedInstance%20IN%20%28%29"
             )
         except Exception:
             return None
 
-    def apm_transactions(self, entity_guid: str) -> str | None:
-        """Open the transaction list for an APM service."""
+    def apm_transactions(
+        self, entity_guid: str, since_minutes: int = 30
+    ) -> str | None:
+        """Open the transaction list for an APM service.
+
+        Verified 2026-04: the correct NR1 route is
+        ``/nr1-core/apm-features/transactions/<GUID>``. The old
+        ``?nerdletId=apm-nerdlets.apm-transactions-nerdlet`` redirect
+        silently lands on the APM summary page.
+        """
         try:
             return (
-                f"{self._base}/redirect/entity/{entity_guid}"
-                f"?nerdletId=apm-nerdlets.apm-transactions-nerdlet"
+                f"{self._base}/nr1-core/apm-features/transactions/{entity_guid}"
+                f"?duration={since_minutes * 60 * 1000}"
             )
         except Exception:
             return None
@@ -145,16 +208,11 @@ class DeepLinkBuilder:
         severity: str | None = None,
         since_minutes: int = 60,
     ) -> str | None:
-        """[DEPRECATED] Open New Relic Logs filtered to a service via Lucene query.
+        """Open New Relic Logs filtered to a service.
 
-        KNOWN BUG: The logger.log-tailer nerdlet uses Lucene syntax. Attributes
-        containing dots (e.g. entity.name) are treated as nested fields and the
-        filter is silently dropped, returning the generic log page.
-
-        PREFER: Use nrql_chart(nrql, since_minutes) with the exact NRQL query
-        that found the logs. This is reliable across all attribute formats.
-
-        Kept for backward compatibility only.
+        Uses the NR1 launcher ``pane=`` format with base64-encoded JSON
+        to pre-load the Lucene query in the logger.log-tailer nerdlet.
+        This correctly handles dotted attribute names like ``entity.name``.
         """
         try:
             query = f"{service_attribute}:'{service_name}'"
@@ -179,20 +237,45 @@ class DeepLinkBuilder:
             return None
 
     # ── Kubernetes links ───────────────────────────────────────────
+    #
+    # NR retired the legacy ``/kubernetes?accountId=X`` route — it now
+    # redirects to the Catalog home page. The current working path is the
+    # entity explorer (``/nr1-core``) filtered on both ``domain`` and
+    # ``type``. Verified 2026-04 against a user-shared working URL from
+    # the live NR UI. Omitting ``domain`` causes NR to drop the type
+    # filter and fall back to "All Entities".
+
+    _K8S_DOMAINS = "'EXT','INFRA','UNINSTRUMENTED'"
+
+    _K8S_ENTITY_TYPES = (
+        "'ARGOCD','CALICO','COREDNS','ENVOY','ISTIO_SERVICE','KEDA',"
+        "'NGINX_INGRESS_CONTROLLER','PROMETHEUS_SERVER',"
+        "'KUBERNETESCLUSTER','KUBERNETES_APISERVER','KUBERNETES_CRONJOB',"
+        "'KUBERNETES_DAEMONSET','KUBERNETES_DEPLOYMENT','KUBERNETES_JOB',"
+        "'KUBERNETES_NAMESPACE','KUBERNETES_PERSISTENTVOLUME',"
+        "'KUBERNETES_PERSISTENTVOLUMECLAIM','KUBERNETES_POD',"
+        "'KUBERNETES_REPLICASET','KUBERNETES_STATEFULSET'"
+    )
+
+    def _k8s_base_filter(self) -> str:
+        return (
+            f"domain IN ({self._K8S_DOMAINS})"
+            f" AND type IN ({self._K8S_ENTITY_TYPES})"
+        )
 
     def k8s_explorer(self, namespace: str | None = None) -> str | None:
-        """Open the K8s cluster explorer, optionally filtered."""
+        """Open the K8s cluster explorer, optionally filtered to a namespace."""
         try:
-            url = (
-                f"{self._base}/kubernetes"
-                f"?accountId={self._account_id}"
-            )
+            filter_expr = self._k8s_base_filter()
             if namespace:
-                filters = json.dumps(
-                    {"namespaceName": namespace}, separators=(",", ":")
+                filter_expr += (
+                    f" AND tags.namespaceName = '{namespace}'"
                 )
-                url += f"&filters={urllib.parse.quote(filters, safe='')}"
-            return url
+            return (
+                f"{self._base}/nr1-core"
+                f"?account={self._account_id}"
+                f"&filters={urllib.parse.quote(f'({filter_expr})', safe='')}"
+            )
         except Exception:
             return None
 
@@ -201,14 +284,15 @@ class DeepLinkBuilder:
     ) -> str | None:
         """Open K8s view filtered to a specific deployment."""
         try:
-            filters = json.dumps(
-                {"namespaceName": namespace, "deploymentName": deployment_name},
-                separators=(",", ":"),
+            filter_expr = (
+                f"{self._k8s_base_filter()}"
+                f" AND tags.namespaceName = '{namespace}'"
+                f" AND tags.deploymentName = '{deployment_name}'"
             )
             return (
-                f"{self._base}/kubernetes"
-                f"?accountId={self._account_id}"
-                f"&filters={urllib.parse.quote(filters, safe='')}"
+                f"{self._base}/nr1-core"
+                f"?account={self._account_id}"
+                f"&filters={urllib.parse.quote(f'({filter_expr})', safe='')}"
             )
         except Exception:
             return None
@@ -228,12 +312,17 @@ class DeepLinkBuilder:
         since_minutes: int,
         result_filter: str | None = None,
     ) -> str | None:
-        """Open synthetic monitor run results."""
+        """Open synthetic monitor run results.
+
+        Verified 2026-04: the correct NR1 route is
+        ``/synthetics/monitor-result-list/<GUID>``. The old
+        ``?nerdletId=synthetics-nerdlets...`` redirect URL silently lands
+        on the monitor summary page instead of the results list.
+        """
         try:
             url = (
-                f"{self._base}/redirect/entity/{entity_guid}"
-                f"?nerdletId=synthetics-nerdlets.synthetics-monitor-overview-react"
-                f"&duration={since_minutes * 60 * 1000}"
+                f"{self._base}/synthetics/monitor-result-list/{entity_guid}"
+                f"?duration={since_minutes * 60 * 1000}"
             )
             if result_filter:
                 url += f"&result={result_filter}"
@@ -242,13 +331,37 @@ class DeepLinkBuilder:
             return None
 
     # ── Alert links ────────────────────────────────────────────────
+    #
+    # The old AIOPS ``/accounts/<id>/incidents/<id>/redirect`` URL returns
+    # "We can't display this alert event" unless the incident ID is a
+    # *current, live* event that the session has cached. For historical
+    # or stale incident IDs (the majority of what Sherlock surfaces) the
+    # page is useless. Verified 2026-04: the ``/alerts`` page with a
+    # large enough ``duration`` window shows the same incident in context
+    # along with neighbouring events, which is what engineers want.
 
-    def alert_incident(self, incident_id: str) -> str | None:
-        """Open a specific alert incident via the AIOPS redirect URL."""
+    def alert_incident(
+        self, incident_id: str, since_minutes: int = 4320
+    ) -> str | None:
+        """Open the alerts page with a window that includes the incident.
+
+        ``since_minutes`` default of 4320 (72h) matches the NR UI default
+        for the alerts view and covers the retention window for most
+        incident records.
+
+        ``incident_id`` is accepted for API compatibility but is no
+        longer encoded in the URL — NR's router does not accept a
+        client-supplied incident ID, and the incident detail drawer
+        requires a server-stored session state. The alerts page opens
+        the full list, from which the user can click the specific
+        incident.
+        """
         try:
+            _ = incident_id  # kept for API compatibility
             return (
-                f"{NR_AIOPS_BASE}/accounts/{self._account_id}"
-                f"/incidents/{incident_id}/redirect"
+                f"{self._base}/alerts"
+                f"?account={self._account_id}"
+                f"&duration={since_minutes * 60 * 1000}"
             )
         except Exception:
             return None
@@ -266,19 +379,12 @@ class DeepLinkBuilder:
     ) -> str | None:
         """Open New Relic Query Builder pre-loaded with a log search NRQL.
 
-        Preferred over log_search() — uses nrql_chart() which correctly handles
-        all attribute names including those containing dots (entity.name, etc.).
-
-        Args:
-            service_name: Service name to filter by (LIKE match).
-            service_attribute: Log attribute name (entity.name, appName, etc.).
-            severity: Optional severity filter (ERROR, WARN, etc.).
-            keyword: Optional keyword to search in message field.
-            since_minutes: Time window in minutes.
-            limit: Max rows (capped at 100 for readability).
+        Uses nrql_chart() with the pane= format to pre-load the NRQL
+        query in the query builder. Reliable across all attribute names
+        including dotted ones like entity.name.
         """
         try:
-            sev_attr = "level"  # default — caller should use discovered attr
+            sev_attr = "level"
             nrql = (
                 f"SELECT timestamp, message, `{service_attribute}`, {sev_attr} "
                 f"FROM Log "

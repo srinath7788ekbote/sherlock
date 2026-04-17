@@ -260,12 +260,24 @@ async def search_logs(
             try:
                 _builder = _get_deeplink_builder()
                 if _builder:
-                    # Use nrql_chart with the EXACT NRQL that found the logs.
-                    # This is reliable — Query Builder uses NRQL natively.
-                    # log_search() uses Lucene syntax which silently drops
-                    # dotted attributes (entity.name) and keyword filters.
+                    # Use log_search_nrql to route through the canonical
+                    # /logger page (verified working 2026-04). This opens
+                    # the NR Logs UI with a Lucene filter applied on the
+                    # service attribute — the page NR users expect when
+                    # investigating logs. The full NRQL is still included
+                    # in ``nrql_used`` for engineers who want to run the
+                    # query in the Query Builder directly.
+                    service_attr = (
+                        used_fallback_attr or intelligence.logs.service_attribute
+                    )
                     response["links"] = {
-                        "view_in_nr": _builder.nrql_chart(nrql, since_minutes),
+                        "view_in_nr": _builder.log_search_nrql(
+                            service_name=resolved_name,
+                            service_attribute=service_attr,
+                            severity=severity,
+                            keyword=keyword,
+                            since_minutes=since_minutes,
+                        ),
                     }
                     # If there are errors in the results, generate an error-only link
                     has_errors = any(
@@ -273,22 +285,12 @@ async def search_logs(
                         for log in logs
                     )
                     if has_errors:
-                        # Build a narrowed error NRQL from the working nrql
-                        error_nrql = nrql
-                        if sev_attr and f"{sev_attr}" in nrql:
-                            # Already filtered by severity — keep as-is
-                            pass
-                        else:
-                            # Insert error filter before SINCE clause
-                            since_pos = error_nrql.upper().find(" SINCE ")
-                            if since_pos > 0:
-                                error_nrql = (
-                                    error_nrql[:since_pos]
-                                    + f" AND `{sev_attr}` IN ('ERROR', 'FATAL', 'CRITICAL')"
-                                    + error_nrql[since_pos:]
-                                )
-                        response["links"]["error_logs"] = _builder.nrql_chart(
-                            error_nrql, since_minutes
+                        response["links"]["error_logs"] = _builder.log_search_nrql(
+                            service_name=resolved_name,
+                            service_attribute=service_attr,
+                            severity="ERROR,FATAL,CRITICAL",
+                            keyword=keyword,
+                            since_minutes=since_minutes,
                         )
             except Exception:
                 pass
