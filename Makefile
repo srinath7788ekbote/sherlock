@@ -1,4 +1,4 @@
-.PHONY: install run test test-fast test-synthetics test-investigate test-dependencies test-discovery test-deeplinks test-domain-tools test-session-memory test-structured-output test-frustration test-cov lint format logs audit connect relearn cli clean
+.PHONY: install run test test-fast test-synthetics test-investigate test-dependencies test-discovery test-deeplinks test-domain-tools test-session-memory test-structured-output test-frustration test-asb test-cov lint format logs audit connect relearn cli clean
 
 install:
 	pip install -e ".[dev]"
@@ -40,6 +40,9 @@ test-structured-output:
 
 test-frustration:
 	pytest tests/test_frustration_detection.py -v
+
+test-asb:
+	pytest tests/test_asb_intelligence.py -v
 
 test-cov:
 	pytest tests/ -v --cov=. --cov-report=html --cov-report=term
