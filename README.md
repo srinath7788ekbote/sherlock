@@ -20,7 +20,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 4. [Installation](#installation)
 5. [Sharing with Teammates (Private Repository)](#sharing-with-teammates-private-repository)
 6. [Configuration](#configuration)
-7. [Available Tools (24)](#available-tools-24)
+7. [Available Tools (23)](#available-tools-23)
 8. [Workflows](#workflows)
 9. [Security Model](#security-model)
 10. [Multi-Tenant Profiles](#multi-tenant-profiles)
@@ -40,7 +40,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 
 ## Overview
 
-This MCP server exposes **24 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
+This MCP server exposes **23 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
 
 ### Key Capabilities
 
@@ -54,7 +54,7 @@ This MCP server exposes **24 tools** that let an AI assistant query your New Rel
 * **Deep links** — every finding includes a clickable URL to the exact New Relic UI view
 * **Service dependency mapping** — automatic dependency graph built from spans, logs, and naming patterns
 * **OTel service detection** — automatic fallback to `Span`-based queries for OpenTelemetry-instrumented services
-* **Zero-result fallback** — mandatory multi-attempt fallback ladder before reporting NO_DATA for any domain
+* **Zero-result fallback** — mandatory multi-attempt fallback ladder before reporting NO\_DATA for any domain
 * **Session memory** — in-memory investigation history enables follow-up questions without re-running investigations
 * **Frustration detection** — detects engineer retry loops and switches to escalation mode with broader investigation strategy
 * **Structured output** — machine-readable JSON reports (full, summary, metrics) for dashboards and integrations
@@ -93,7 +93,6 @@ A Team Lead orchestrates 6 specialist agents, each calling domain-specific MCP t
 │  │  sanitize │ exceptions │ deeplinks │ utils              │ │
 │  │  session_memory │ structured_output                     │ │
 │  │  dependency_graph │ graph_builder                       │ │
-│  │  discovery [DEPRECATED] │ query_builder [DEPRECATED]    │ │
 │  └──────┬──────────────────────────────────────────────────┘ │
 │         │                                                    │
 │  ┌──────▼──────────────────────────────────────────────────┐ │
@@ -447,7 +446,7 @@ python scripts/cli.py
 
 ***
 
-## Available Tools (24)
+## Available Tools (23)
 
 ### Connection & Intelligence (8 tools)
 
@@ -511,17 +510,11 @@ python scripts/cli.py
 | 21 | `get_monitor_results`    | Get recent check results for a monitor                                  |
 | 22 | `investigate_synthetic`  | Full investigation — monitor health + APM correlation + recommendations |
 
-### Investigation (1 tool)
-
-| #  | Tool                  | Description                                                                                                                                                                         |
-| -- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 23 | `investigate_service` | **\[LEGACY]** Quick automated check across all domains. For comprehensive investigation, use the agent-team pattern (sherlock-team-lead dispatching to all 6 domain agents) instead |
-
 ### Service Dependencies (1 tool)
 
 | #  | Tool                       | Description                                                                                                                     |
 | -- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 24 | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
+| 23 | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
 
 ***
 
@@ -829,11 +822,11 @@ Sherlock automatically discovers Azure Service Bus (ASB) resources during `learn
 
 ### What Gets Discovered
 
-| Resource | Event Type | Key Metrics |
-|----------|-----------|-------------|
-| Queues | `AzureServiceBusQueueSample` | `activeMessages`, `deadLetterMessages`, `incomingMessages` |
-| Topics | `AzureServiceBusTopicSample` | `incomingMessages` |
-| Namespaces | `AzureServiceBusNamespaceSample` | Namespace names |
+| Resource   | Event Type                       | Key Metrics                                                |
+| ---------- | -------------------------------- | ---------------------------------------------------------- |
+| Queues     | `AzureServiceBusQueueSample`     | `activeMessages`, `deadLetterMessages`, `incomingMessages` |
+| Topics     | `AzureServiceBusTopicSample`     | `incomingMessages`                                         |
+| Namespaces | `AzureServiceBusNamespaceSample` | Namespace names                                            |
 
 ### Intelligence Output
 
@@ -854,7 +847,7 @@ During investigations, agents correlate ASB data with service health:
 * **Active message growth + healthy consumers** → upstream sending faster than consumers can process
 * **Zero incoming messages** → producer service may be down
 
-> **Note:** ASB discovery requires the New Relic Azure integration to be configured for your Service Bus namespace. If no `AzureServiceBusQueueSample` data exists, learn_account reports `⚪ Azure Service Bus: not configured`.
+> **Note:** ASB discovery requires the New Relic Azure integration to be configured for your Service Bus namespace. If no `AzureServiceBusQueueSample` data exists, learn\_account reports `⚪ Azure Service Bus: not configured`.
 
 ***
 
@@ -869,19 +862,19 @@ Every completed investigation is stored as a lightweight `InvestigationSnapshot`
 * Service name, namespace, bare name
 * Severity (CRITICAL / WARNING / HEALTHY)
 * Root cause and causal chain
-* Causal pattern (DB_CASCADE, DEPLOY_REGRESSION, TRAFFIC_FLOOD, etc.)
+* Causal pattern (DB\_CASCADE, DEPLOY\_REGRESSION, TRAFFIC\_FLOOD, etc.)
 * Error rate, OTel flag, open incident IDs
 * Chronic and stale signal flags
 * Investigation timestamp
 
 ### Use Cases
 
-| Engineer Says | What Happens |
-|--------------|--------------|
-| "Is X still degraded?" | `get_session_context` retrieves the last snapshot; if < 30 min old, compares against a quick live check |
-| "Why did that happen again?" | Pulls root cause from prior investigation of that service |
-| "Check the same service" | Uses the last investigated service name from context |
-| "Has it improved?" | Compares current quick check against prior snapshot severity |
+| Engineer Says                | What Happens                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| "Is X still degraded?"       | `get_session_context` retrieves the last snapshot; if < 30 min old, compares against a quick live check |
+| "Why did that happen again?" | Pulls root cause from prior investigation of that service                                               |
+| "Check the same service"     | Uses the last investigated service name from context                                                    |
+| "Has it improved?"           | Compares current quick check against prior snapshot severity                                            |
 
 ### Tool
 
@@ -901,10 +894,10 @@ Sherlock detects when an engineer is stuck in a frustration/retry loop and autom
 
 ### Detection Signals
 
-| Signal Type | Examples |
-|------------|---------|
-| **Language** | "still broken", "why is this still failing", "checked 3 times", "nothing works", "same issue again" |
-| **Retry count** | Same service investigated ≥ 2 times within 20 minutes |
+| Signal Type     | Examples                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| **Language**    | "still broken", "why is this still failing", "checked 3 times", "nothing works", "same issue again" |
+| **Retry count** | Same service investigated ≥ 2 times within 20 minutes                                               |
 
 Both signals are combined — language frustration alone or repeated retries alone can trigger escalation.
 
@@ -924,6 +917,7 @@ get_frustration_context(prompt="why is this STILL not working?!", service_name="
 ```
 
 Returns:
+
 * `mode` — `NORMAL` or `ESCALATION`
 * `language_frustrated` — boolean
 * `retry_count` — how many times this service was investigated recently
@@ -937,11 +931,11 @@ Sherlock can export investigation results as machine-readable structured JSON, e
 
 ### Formats
 
-| Format | Contents | Use Case |
-|--------|----------|----------|
-| `full` | All investigation fields: severity, domain results, causal chain, recommendations, timing | MTTR dashboards, ticketing systems |
-| `summary` | Verdict + root cause only | Slack/Teams notifications, quick comparisons |
-| `metrics` | Numeric values only (error rate, latency, throughput, pod count) | Charting, alerting pipelines |
+| Format    | Contents                                                                                  | Use Case                                     |
+| --------- | ----------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `full`    | All investigation fields: severity, domain results, causal chain, recommendations, timing | MTTR dashboards, ticketing systems           |
+| `summary` | Verdict + root cause only                                                                 | Slack/Teams notifications, quick comparisons |
+| `metrics` | Numeric values only (error rate, latency, throughput, pod count)                          | Charting, alerting pipelines                 |
 
 ### Tool
 
@@ -952,7 +946,7 @@ get_structured_report(service_name="checkout-service", format="full")
 Returns a typed `InvestigationReport` JSON with:
 
 * **Identity** — service name, namespace, account
-* **Verdict** — severity, confidence, is_victim, origin_service
+* **Verdict** — severity, confidence, is\_victim, origin\_service
 * **Domain results** — status + finding + key metric + deep link per domain (APM, K8s, Logs, Alerts, Synthetics, Infra)
 * **Recommendations** — priority, action, reason per recommendation
 * **Causal chain** — root cause → intermediate → symptom
@@ -968,10 +962,10 @@ New Relic accounts may contain both **APM agent** services and **OpenTelemetry**
 
 ### Detection Logic
 
-| Type | Event Table | Name Attribute | Error Attribute |
-|------|------------|----------------|-----------------|
-| **APM** | `Transaction`, `TransactionError` | `appName` | `error IS true` |
-| **OTel** | `Span`, `Log` | `entity.name`, `service.name` | `otel.status_code = 'ERROR'` |
+| Type     | Event Table                       | Name Attribute                | Error Attribute              |
+| -------- | --------------------------------- | ----------------------------- | ---------------------------- |
+| **APM**  | `Transaction`, `TransactionError` | `appName`                     | `error IS true`              |
+| **OTel** | `Span`, `Log`                     | `entity.name`, `service.name` | `otel.status_code = 'ERROR'` |
 
 OTel services are identified by entity type `EXT|SERVICE` in their GUID.
 
@@ -989,22 +983,22 @@ This fallback is built into `get_service_golden_signals` and `get_app_metrics` �
 
 ## Zero-Result Fallback Protocol
 
-Every domain agent follows a mandatory multi-attempt fallback ladder before reporting NO_DATA. This prevents false negatives caused by wrong event types, wrong name formats, or wrong time windows.
+Every domain agent follows a mandatory multi-attempt fallback ladder before reporting NO\_DATA. This prevents false negatives caused by wrong event types, wrong name formats, or wrong time windows.
 
 ### Minimum Attempts by Domain
 
-| Domain | Min Attempts | Fallback Strategy |
-|--------|-------------|-------------------|
-| **APM** | 2 | `Transaction` → `Span` (OTel fallback) |
-| **K8s** | 5 | `get_k8s_health` → `deploymentName LIKE` → `podName LIKE` → `label.app LIKE` → `namespaceName =` |
-| **Logs** | 3 | `appName` → `entity.name` → bare name wildcard |
-| **Infra** | 2 | `Metric` → `Log`-based fallback |
+| Domain    | Min Attempts | Fallback Strategy                                                                                |
+| --------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| **APM**   | 2            | `Transaction` → `Span` (OTel fallback)                                                           |
+| **K8s**   | 5            | `get_k8s_health` → `deploymentName LIKE` → `podName LIKE` → `label.app LIKE` → `namespaceName =` |
+| **Logs**  | 3            | `appName` → `entity.name` → bare name wildcard                                                   |
+| **Infra** | 2            | `Metric` → `Log`-based fallback                                                                  |
 
-### NO_DATA Format
+### NO\_DATA Format
 
-When all fallbacks are exhausted, agents report structured NO_DATA:
+When all fallbacks are exhausted, agents report structured NO\_DATA:
 
-```json
+```JSON
 {
   "domain": "k8s",
   "tried": ["get_k8s_health (0 results)", "deploymentName LIKE (0 results)", "podName LIKE (0 results)"],
@@ -1028,7 +1022,7 @@ sherlock/
 ├── Makefile                    # Development commands
 ├── .env.example                # Environment variable template
 ├── .gitignore
-├── main.py                     # MCP server entry point (24 tools)
+├── main.py                     # MCP server entry point (23 tools)
 ├── .github/
 │   ├── copilot-instructions.md # Agent-team rules, report format, anti-hallucination
 │   ├── agents/                 # 7 agent definitions
@@ -1061,9 +1055,7 @@ sherlock/
 │   ├── dependency_graph.py     # Dependency graph data model and persistence
 │   ├── graph_builder.py        # 3-strategy dependency graph builder (spans, logs, naming)
 │   ├── session_memory.py       # In-memory investigation history for follow-up questions
-│   ├── structured_output.py    # Machine-readable structured report generation
-│   ├── discovery.py            # [DEPRECATED] Data discovery engine
-│   └── query_builder.py        # [DEPRECATED] Dynamic NRQL query generation
+│   └── structured_output.py    # Machine-readable structured report generation
 ├── client/
 │   ├── __init__.py
 │   └── newrelic.py             # NerdGraph HTTP client (read-only, retry, batch)
@@ -1077,12 +1069,11 @@ sherlock/
 │   ├── k8s.py                  # Kubernetes health (direct NRQL queries)
 │   ├── golden_signals.py       # Golden signals (direct NRQL queries)
 │   ├── synthetics.py           # Synthetic monitoring (status, results, investigation)
-│   ├── investigate.py          # [LEGACY] Monolith investigation engine
 │   ├── intelligence_tools.py   # Connection, learning, profiles, session, frustration, structured output
 │   └── dependencies.py         # Service dependency mapping
 ├── scripts/
 │   ├── validate_connection.py   # Interactive connection validator
-│   └── cli.py                  # Interactive CLI for all 24 tools
+│   └── cli.py                  # Interactive CLI for all 23 tools
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
 │   ├── test_alerts.py
@@ -1094,17 +1085,14 @@ sherlock/
 │   ├── test_deeplinks.py
 │   ├── test_dependencies_tool.py
 │   ├── test_dependency_graph.py
-│   ├── test_discovery.py
 │   ├── test_entities.py
 │   ├── test_golden_signals.py
 │   ├── test_graph_builder.py
 │   ├── test_intelligence.py
 │   ├── test_intelligence_tools.py
-│   ├── test_investigate.py
 │   ├── test_k8s.py
 │   ├── test_logs.py
 │   ├── test_nrql.py
-│   ├── test_query_builder.py
 │   ├── test_sanitize.py
 │   ├── test_session_memory.py
 │   ├── test_structured_output.py
@@ -1131,14 +1119,8 @@ make test-domain-tools
 # Synthetics tests only
 make test-synthetics
 
-# Investigation tests only
-make test-investigate
-
 # Dependency graph tests only
 make test-dependencies
-
-# Discovery engine tests only
-make test-discovery
 
 # Deep links tests only
 make test-deeplinks
@@ -1165,7 +1147,7 @@ make test-cov
 # Re-learn account topology (refresh intelligence cache)
 make relearn
 
-# Interactive CLI for all 24 tools
+# Interactive CLI for all 23 tools
 make cli
 
 # Clean __pycache__ directories

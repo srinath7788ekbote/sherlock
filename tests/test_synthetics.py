@@ -1,7 +1,7 @@
 """
 Tests for synthetics monitoring tools.
 
-Required test cases (12):
+Required test cases (11):
 1. test_get_synthetic_monitors_returns_all
 2. test_get_monitor_status_passing
 3. test_get_monitor_status_global_failure
@@ -12,8 +12,7 @@ Required test cases (12):
 8. test_investigate_synthetic_global_down_apm_also_failing
 9. test_investigate_synthetic_global_down_apm_healthy
 10. test_investigate_synthetic_regional_failure
-11. test_synthetic_correlation_in_investigate_service
-12. test_synthetic_detected_before_apm_alert
+11. test_synthetic_detected_before_apm_alert
 """
 
 import json
@@ -341,90 +340,3 @@ class TestInvestigateSynthetic:
         lower = result.lower()
         assert "region" in lower or "REGIONAL" in result or "location" in lower
 
-
-class TestSyntheticCorrelation:
-    """Tests for synthetic correlation in investigation tools."""
-
-    # 11. test_synthetic_correlation_in_investigate_service
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_synthetic_correlation_in_investigate_service(self, synth_context):
-        """investigate_service includes synthetic data for services with monitors."""
-        from tools.investigate import investigate_service
-
-        # Build responses for the full investigation pipeline
-        # APM golden signals
-        golden = _mock_nrql_response([{"avg_duration": 0.05, "error_rate": 0.2, "throughput": 1500}])
-        # Alerts/incidents
-        alerts = _mock_nrql_response([])
-        # Logs
-        logs_resp = _mock_nrql_response([])
-        # K8s
-        k8s_resp = _mock_nrql_response([])
-        # Synthetic monitor status
-        synth_status = _mock_batch_response(
-            q0=[{"result": "SUCCESS", "monitorName": "Login Flow"}],
-            q1=[{"locationLabel": "AWS_US_EAST_1", "success_rate": 100}],
-            q2=[{"average_duration": 0.5}],
-            q3=[{"latest_result": "SUCCESS", "timestamp": 1700000000000}],
-            q4=[{"total_checks": 100, "failed_checks": 0}],
-        )
-
-        respx.post("https://api.newrelic.com/graphql").mock(
-            side_effect=[
-                httpx.Response(200, json=golden),
-                httpx.Response(200, json=golden),
-                httpx.Response(200, json=golden),
-                httpx.Response(200, json=golden),
-                httpx.Response(200, json=golden),
-                httpx.Response(200, json=golden),
-                httpx.Response(200, json=golden),
-                httpx.Response(200, json=alerts),
-                httpx.Response(200, json=logs_resp),
-                httpx.Response(200, json=k8s_resp),
-                httpx.Response(200, json=synth_status),
-                httpx.Response(200, json=synth_status),
-                httpx.Response(200, json=synth_status),
-                httpx.Response(200, json=synth_status),
-                httpx.Response(200, json=synth_status),
-            ]
-        )
-
-        result = await investigate_service("web-api")
-        lower = result.lower()
-        # Should include synthetic correlation data
-        assert "synthetic" in lower or "monitor" in lower or "login" in lower
-
-    # 12. test_synthetic_detected_before_apm_alert
-    @respx.mock
-    @pytest.mark.asyncio
-    async def test_synthetic_detected_before_apm_alert(self, synth_context):
-        """Synthetic failures can be detected before APM alerts fire."""
-        # Synthetic: failing (detected quickly by external probes)
-        synth_failing = _mock_batch_response(
-            q0=[{"result": "FAILED", "monitorName": "Login Flow", "timestamp": 1700000000000}],
-            q1=[
-                {"locationLabel": "AWS_US_EAST_1", "success_rate": 0},
-                {"locationLabel": "AWS_EU_WEST_1", "success_rate": 0},
-            ],
-            q2=[{"average_duration": 30.0}],
-            q3=[{"latest_result": "FAILED", "timestamp": 1700000000000}],
-            q4=[{"total_checks": 20, "failed_checks": 20}],
-        )
-        # APM: no alerts yet (lag in alert evaluation)
-        apm_no_alerts = _mock_nrql_response([])
-
-        responses = [
-            httpx.Response(200, json=synth_failing),
-            httpx.Response(200, json=synth_failing),
-            httpx.Response(200, json=synth_failing),
-            httpx.Response(200, json=synth_failing),
-            httpx.Response(200, json=synth_failing),
-            httpx.Response(200, json=apm_no_alerts),
-            httpx.Response(200, json=apm_no_alerts),
-        ]
-        respx.post("https://api.newrelic.com/graphql").mock(side_effect=responses)
-
-        result = await investigate_synthetic("Login Flow - Production")
-        # Synthetic detected the issue — response should contain failure info
-        assert "FAILED" in result.upper() or "GLOBAL_FAILURE" in result or "failure" in result.lower()

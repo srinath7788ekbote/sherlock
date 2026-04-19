@@ -8,7 +8,7 @@ Covers:
   - URL encoding of NRQL and special characters
   - Error resilience (bad input → None, never raises)
   - get_builder() convenience function
-  - Link injection in investigate, synthetics, golden_signals, k8s, alerts, logs
+  - Link injection in synthetics, golden_signals, k8s, alerts, logs
 """
 
 import base64
@@ -154,49 +154,6 @@ class TestApmErrors:
         assert "nerdletId=apm-nerdlets.apm-transactions-nerdlet" not in url
 
 
-# ── Log search tests ────────────────────────────────────────────────────
-
-
-class TestLogSearch:
-    """log_search() uses the canonical ``/logger`` route.
-
-    Verified 2026-04 against a user-shared onenr.io short link which
-    resolves to ``/logger?account=<id>&query=<lucene>&begin=<ms>&end=<ms>``.
-    This is the same URL the "Logs" nav button produces in the NR UI.
-    """
-
-    def test_log_search_returns_url(self, builder_us):
-        url = builder_us.log_search("my-svc", "service.name", "ERROR", 60)
-        assert url is not None
-        assert isinstance(url, str)
-
-    def test_log_search_uses_logger_path(self, builder_us):
-        """Must route through the logger.log-tailer launcher with pane= payload."""
-        url = builder_us.log_search("svc", "service.name", None, 10)
-        assert "/launcher/logger.log-tailer" in url
-        assert "pane=" in url
-
-    def test_log_search_contains_account_id(self, builder_us):
-        url = builder_us.log_search("svc", "service.name", None, 10)
-        assert "platform[accountId]=123456" in url
-
-    def test_log_search_us_region(self, builder_us):
-        url = builder_us.log_search("svc", "service.name", None, 10)
-        assert url.startswith(NR_BASE_US)
-
-    def test_log_search_eu_region(self, builder_eu):
-        url = builder_eu.log_search("svc", "service.name", None, 10)
-        assert url.startswith(NR_BASE_EU)
-
-    def test_log_search_with_severity_still_returns_url(self, builder_us):
-        url = builder_us.log_search("svc", "service.name", "ERROR", 60)
-        assert url is not None
-
-    def test_log_search_without_severity_still_returns_url(self, builder_us):
-        url = builder_us.log_search("svc", "service.name", None, 60)
-        assert url is not None
-
-
 # ── K8s tests ────────────────────────────────────────────────────────────
 
 
@@ -336,8 +293,8 @@ class TestErrorResilience:
         # distributed_traces
         result = builder_us.distributed_traces("", 0, error_only=True)
         assert result is None or isinstance(result, str)
-        # log_search
-        result = builder_us.log_search("", "", None, 0)
+        # log_search_nrql
+        result = builder_us.log_search_nrql(service_name="", service_attribute="", since_minutes=0)
         assert result is None or isinstance(result, str)
         # k8s_explorer
         result = builder_us.k8s_explorer(None)
@@ -373,117 +330,6 @@ class TestGetBuilder:
         builder = get_builder()
         assert builder is not None
         assert isinstance(builder, DeepLinkBuilder)
-
-
-# ── Integration: investigate_service link injection ──────────────────────
-
-
-class TestInvestigateLinkInjection:
-    @pytest.mark.asyncio
-    async def test_investigate_report_has_service_overview_link(
-        self, mock_context, mock_nerdgraph
-    ):
-        """Mock investigate_service, verify service_overview in report."""
-        from tools.investigate import investigate_service
-        from core.utils import InvestigationAnchor  # noqa: F811
-
-        result = await investigate_service("payment-svc-prod", since_minutes=30)
-        data = json.loads(result)
-
-        if "investigation_report" in data:
-            report = data["investigation_report"]
-            # service_overview should be present (may be None if no GUID
-            # but the key must exist).
-            assert "service_overview" in report
-
-    @pytest.mark.asyncio
-    async def test_finding_has_deep_link_when_error_rate_fires(
-        self, mock_context, mock_nerdgraph
-    ):
-        """When an error_rate finding fires, it should include a spike_chart URL."""
-        from tools.investigate import _inject_finding_deep_links
-        from core.utils import InvestigationAnchor
-
-        findings = [
-            {
-                "source": "APM",
-                "signal": "error_rate",
-                "severity": "CRITICAL",
-                "finding": "🔴 CRITICAL error rate: 45.2%",
-            }
-        ]
-        anchor = InvestigationAnchor(
-            primary_service="payment-svc-prod",
-            since_minutes=60,
-        )
-        intel = mock_context._intelligence
-        guid = intel.apm.service_guids.get("payment-svc-prod")
-
-        _inject_finding_deep_links(findings, anchor, guid, "payments-prod", intel)
-
-        assert "deep_link" in findings[0]
-        # Uses the data-exploration query-builder with pane= to pre-load NRQL.
-        deep_link = findings[0]["deep_link"]
-        assert deep_link is not None
-        assert "/launcher/data-exploration.query-builder" in deep_link
-        assert "pane=" in deep_link
-        assert "platform[accountId]=" in deep_link
-
-    @pytest.mark.asyncio
-    async def test_finding_has_no_deep_link_when_not_applicable(
-        self, mock_context, mock_nerdgraph
-    ):
-        """A finding with no matching link rule should have no deep_link."""
-        from tools.investigate import _inject_finding_deep_links
-        from core.utils import InvestigationAnchor
-
-        findings = [
-            {
-                "source": "UNKNOWN",
-                "signal": "custom_thing",
-                "severity": "INFO",
-                "finding": "Some info",
-            }
-        ]
-        anchor = InvestigationAnchor(
-            primary_service="payment-svc-prod",
-            since_minutes=60,
-        )
-        _inject_finding_deep_links(
-            findings, anchor, None, None, mock_context._intelligence
-        )
-        assert "deep_link" not in findings[0]
-
-    @pytest.mark.asyncio
-    async def test_recommendation_has_links_when_p1_apm(
-        self, mock_context, mock_nerdgraph
-    ):
-        """P1 APM recommendation includes error_profile link."""
-        from tools.investigate import _inject_recommendation_links
-        from core.utils import InvestigationAnchor
-
-        recs = [
-            {
-                "priority": "P1",
-                "area": "errors",
-                "finding": "Critically high error rate detected.",
-                "action": "Check recent deployments.",
-                "urgency": "IMMEDIATE",
-            }
-        ]
-        anchor = InvestigationAnchor(
-            primary_service="payment-svc-prod",
-            since_minutes=60,
-        )
-        intel = mock_context._intelligence
-        guid = intel.apm.service_guids.get("payment-svc-prod")
-
-        _inject_recommendation_links(recs, anchor, guid, "payments-prod", intel)
-
-        assert "links" in recs[0]
-        assert "error_profile" in recs[0]["links"]
-        assert recs[0]["links"]["error_profile"] is not None
-        assert "errors-inbox" in recs[0]["links"]["error_profile"]
 
 
 # ── Integration: K8s links ───────────────────────────────────────────────
@@ -696,13 +542,8 @@ class TestAlertLinkInjection:
 # ── log_search_nrql tests ───────────────────────────────────────────────
 
 
-class TestLogSearchDeprecated:
-    """log_search_nrql() delegates to nrql_chart() with a pane= payload.
-
-    log_search() uses the logger.log-tailer launcher with pane=.
-    Both methods use the base64-encoded pane parameter format that
-    NR1 nerdlets consume for initial configuration.
-    """
+class TestLogSearchNrql:
+    """log_search_nrql() delegates to nrql_chart() with a pane= payload."""
 
     def test_log_search_nrql_uses_logger_path(self):
         """log_search_nrql() must route to the query-builder with pane= payload."""
@@ -739,17 +580,3 @@ class TestLogSearchDeprecated:
         assert url is not None
         assert isinstance(url, str)
 
-    def test_log_search_deprecated_method_still_works(self):
-        """log_search() still returns a URL (backward compat)."""
-        builder = DeepLinkBuilder(account_id="3007677", region="US")
-        url = builder.log_search(
-            service_name="tagging-service",
-            service_attribute="entity.name",
-            severity="ERROR",
-            since_minutes=60,
-        )
-        assert url is not None
-        assert isinstance(url, str)
-        # Must use the launcher with pane= payload.
-        assert "/launcher/logger.log-tailer" in url
-        assert "pane=" in url

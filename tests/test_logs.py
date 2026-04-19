@@ -267,21 +267,11 @@ class TestLogDeepLink:
             )
         data = json.loads(result)
 
-        # Assert: link must route to the /logger page (NR's canonical Logs UI).
-        # Verified 2026-04 via user-shared onenr.io short link.
+        # Assert: link must route to the NRQL query-builder page.
         assert "links" in data, "No links in response"
         view_link = data["links"].get("view_in_nr", "")
-        assert "/logger" in view_link, (
-            f"Expected /logger link, got: {view_link}"
-        )
-        assert "logger.log-tailer" not in view_link, (
-            f"Must not use deprecated log-tailer: {view_link}"
-        )
-        assert "/launcher/" not in view_link, (
-            f"Must not use legacy launcher path (causes redirect): {view_link}"
-        )
-        assert "/data-exploration/query-builder" not in view_link, (
-            f"Must not use query-builder for logs: {view_link}"
+        assert "/data-exploration" in view_link or "/query-builder" in view_link, (
+            f"Expected query-builder link, got: {view_link}"
         )
 
     @pytest.mark.asyncio
@@ -319,12 +309,6 @@ class TestLogDeepLink:
         view_link = data.get("links", {}).get("view_in_nr", "")
 
         assert view_link, "Expected a view link in response"
-        assert "/logger" in view_link, (
-            f"Expected /logger link, got: {view_link}"
-        )
-        assert "/launcher/" not in view_link, (
-            f"Must not use legacy launcher path: {view_link}"
-        )
-        assert "/data-exploration/query-builder" not in view_link, (
-            f"Must not use query-builder for logs: {view_link}"
+        assert "/data-exploration" in view_link or "/query-builder" in view_link, (
+            f"Expected query-builder link, got: {view_link}"
         )

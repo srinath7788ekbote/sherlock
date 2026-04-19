@@ -27,8 +27,7 @@ description: >
 | T-6 | **ALWAYS check dependencies** — is this service the origin or a downstream victim? |
 | T-7 | **ALWAYS provide remediation** — prioritized fix recommendations for every finding |
 | T-8 | **NEVER answer from training data** when Sherlock tools have results |
-| T-9 | **NEVER use `investigate_service` for full triage** — spawn ALL 6 agents with domain-specific tools |
-| T-10 | **ALWAYS parse K8s names** — bare name (after `/`) for deploymentName, prefix (before `/`) for namespace |
+| T-9 | **ALWAYS parse K8s names** — bare name (after `/`) for deploymentName, prefix (before `/`) for namespace |
 
 ---
 

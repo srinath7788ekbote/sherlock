@@ -30,7 +30,6 @@ from tools.intelligence_tools import (
     learn_account_tool,
     list_profiles,
 )
-from tools.investigate import investigate_service  # LEGACY
 from tools.k8s import get_k8s_health
 from tools.logs import search_logs
 from tools.nrql import run_nrql_query
@@ -47,7 +46,6 @@ TOOL_MAP = {
     "learn_account": learn_account_tool,
     "get_account_summary": get_account_summary,
     "get_nrql_context": get_nrql_context,
-    "investigate_service": investigate_service,  # LEGACY — prefer agent-team
     "investigate_synthetic": investigate_synthetic,
     "get_service_golden_signals": get_service_golden_signals,
     "get_k8s_health": get_k8s_health,

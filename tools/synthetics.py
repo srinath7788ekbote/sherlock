@@ -819,8 +819,11 @@ async def investigate_synthetic(
                         _guid, since_minutes, "FAILED"
                     ),
                     "correlated_logs": (
-                        _builder.log_search(
-                            associated_service, _svc_attr, "ERROR", since_minutes
+                        _builder.log_search_nrql(
+                            service_name=associated_service,
+                            service_attribute=_svc_attr,
+                            severity="ERROR",
+                            since_minutes=since_minutes,
                         )
                         if associated_service
                         else None

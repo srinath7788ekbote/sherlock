@@ -199,42 +199,13 @@ class DeepLinkBuilder:
         except Exception:
             return None
 
-    # ── Log links ──────────────────────────────────────────────────
-
-    def log_search(
-        self,
-        service_name: str,
-        service_attribute: str,
-        severity: str | None = None,
-        since_minutes: int = 60,
-    ) -> str | None:
-        """Open New Relic Logs filtered to a service.
-
-        Uses the NR1 launcher ``pane=`` format with base64-encoded JSON
-        to pre-load the Lucene query in the logger.log-tailer nerdlet.
-        This correctly handles dotted attribute names like ``entity.name``.
-        """
-        try:
-            query = f"{service_attribute}:'{service_name}'"
-            if severity:
-                query += f" AND level:'{severity}'"
-            pane = json.dumps(
-                {
-                    "nerdletId": "logger.log-tailer",
-                    "accountId": int(self._account_id),
-                    "duration": since_minutes * 60 * 1000,
-                    "query": query,
-                },
-                separators=(",", ":"),
-            )
-            pane_b64 = base64.b64encode(pane.encode()).decode()
-            return (
-                f"{self._base}/launcher/logger.log-tailer"
-                f"?pane={urllib.parse.quote(pane_b64, safe='')}"
-                f"&platform[accountId]={self._account_id}"
-            )
-        except Exception:
-            return None
+    # ── NRQL-based log links ─────────────────────────────────────────
+    #
+    # The Lucene-style log_search() method was removed because NR1
+    # deprecated the logger.log-tailer nerdlet and because the Lucene
+    # parser silently drops dotted attributes like entity.name, which
+    # breaks OTel-instrumented tenants. Use log_search_nrql() instead —
+    # it opens the NRQL query builder with a pre-loaded query.
 
     # ── Kubernetes links ───────────────────────────────────────────
     #

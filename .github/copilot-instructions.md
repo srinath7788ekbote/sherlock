@@ -20,8 +20,7 @@ All answers MUST be grounded in actual telemetry data from New Relic.
 | 6 | **NEVER output a partial investigation** — complete all applicable domains before responding |
 | 7 | **NEVER say "I can look into this if you'd like"** — you MUST already be investigating |
 | 8 | **ALWAYS report NO_DATA** when a domain lacks data — this is valuable signal, not a failure |
-| 9 | **NEVER rely on `investigate_service` alone** — use agent teams for full investigations |
-| 10 | **ALWAYS spawn ALL 6 agents** for any "investigate" request |
+| 9 | **ALWAYS spawn ALL 6 agents** for any "investigate" request |
 
 ---
 
@@ -32,20 +31,15 @@ The Team Lead orchestrates, specialist agents investigate, Team Lead synthesizes
 
 ### ⛔ AGENT-FIRST INVESTIGATION — CRITICAL RULE
 
-**For full investigations, NEVER call `investigate_service` as the sole tool.**
-That tool's internal discovery engine can miss K8s, infra, and other domains
-due to naming mismatches in NRQL queries.
-
-Instead, use the **agent-team pattern**: spawn ALL 6 specialist agents,
+Always use the **agent-team pattern**: spawn ALL 6 specialist agents,
 each calling its own domain-specific MCP tools directly. This guarantees
 every domain is queried with the correct tool, naming convention, and
 fallback strategy.
 
 | ❌ WRONG (unreliable) | ✅ RIGHT (comprehensive) |
-|------------------------|--------------------------|
-| `investigate_service` → hope it finds K8s | 6 agents, each with domain-specific tools |
-| One discovery query for all domains | K8s agent calls `get_k8s_health` directly |
-| Silent failure on complex NRQL | Each agent tries multiple query strategies |
+|------------------------|---------------------------|
+| A single monolith query for all domains | 6 agents, each with domain-specific tools |
+| K8s agent calls `get_k8s_health` directly | Each agent tries multiple query strategies |
 
 ### Agent Roster
 
@@ -188,12 +182,6 @@ this, agents may use wrong names in their queries.
 | `mcp_sherlock_get_service_dependencies` | Infra | Upstream/downstream dependency map |
 | `mcp_sherlock_run_nrql_query` | ALL | Execute any NRQL query |
 
-### Quick-Check Tool (NOT for full investigations)
-
-| Tool | Purpose |
-|------|---------|
-| `mcp_sherlock_investigate_service` | Quick automated check — use ONLY for fast summary, NOT full investigation |
-
 ### Tool Selection Guide
 
 | Question Type | Approach | Tools |
@@ -205,7 +193,6 @@ this, agents may use wrong names in their queries.
 | "Check synthetic monitors" | Targeted: Synthetics agent | `get_synthetic_monitors`, `investigate_synthetic` |
 | "What depends on X?" | Targeted: Infra agent | `get_service_dependencies` |
 | "Run NRQL" | Direct | `get_nrql_context` first, then `run_nrql_query` |
-| "Quick summary of X" | `investigate_service` (single tool) | Quick check only |
 
 ### OTel vs APM Service Detection
 
@@ -423,7 +410,6 @@ These are clickable New Relic URLs. **Every finding MUST include its deep link.*
 | Tool | Link Field | Contains |
 |------|-----------|----------|
 | `get_service_golden_signals` | `links.service_overview`, `links.error_chart`, `links.latency_chart` | APM entity, error/latency NRQL charts |
-| `investigate_service` | `findings[].deep_link` | Per-finding NR links |
 | `get_k8s_health` | — | K8s explorer link (build from account) |
 | `get_service_incidents` | `incidents[].deep_link` | Alert incident pages |
 | `run_nrql_query` | — | Agents should build: `https://one.newrelic.com/launcher/data-exploration.query-builder?...` |

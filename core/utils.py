@@ -1,14 +1,10 @@
 """
 Shared utility functions for Sherlock tools.
-
-Extracted from tools/investigate.py to remove coupling between
-domain-specific tools and the monolith investigation engine.
 """
 
 import re as _re
 
 from pydantic import BaseModel, Field
-from datetime import datetime, timezone
 
 
 def safe_extract_results(body: dict) -> list[dict]:
@@ -76,33 +72,6 @@ def strip_null_timeseries(results: list[dict]) -> list[dict]:
             return [summary]
 
     return filtered
-
-
-class IncidentPattern(BaseModel):
-    """Pattern analysis across recent incidents for the same service."""
-
-    occurrence_count: int = 0
-    first_occurrence: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_occurrence: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    is_recurring: bool = False
-    recurrence_interval_hours: float | None = None
-    consistent_cause: str | None = None
-    pattern_summary: str = ""
-
-
-class InvestigationAnchor(BaseModel):
-    """Anchors an investigation to the correct time window and service."""
-
-    primary_service: str = ""
-    all_candidates: list[str] = Field(default_factory=list)
-    active_incident: dict | None = None
-    recent_incidents: list[dict] = Field(default_factory=list)
-    window_start: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    window_end: datetime | None = None
-    since_minutes: int = 60
-    until_clause: str = ""
-    window_source: str = "default"
-    incident_pattern: IncidentPattern | None = None
 
 
 # ── Frustration / Retry Detection ────────────────────────────────────────
