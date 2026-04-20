@@ -1010,6 +1010,26 @@ When all fallbacks are exhausted, agents report structured NO\_DATA:
 
 This is a valuable signal — it tells the engineer what was tried and what to check next, rather than a silent omission.
 
+### Platform Log Discovery (tenant-agnostic)
+
+`search_logs` automatically discovers Kubernetes platform namespaces
+(istio-system, ingress-nginx, kube-system, etc.) during `learn_account`
+and queries them when a platform-component investigation returns zero
+results from service-attribute searches. Works across all log-forwarder
+conventions (Fluent Bit, OTel k8sattributes, Fluentd).
+
+Discovered platform data is exposed in `learn_account` output under:
+- `logs.namespace_attribute` — tenant's log namespace attribute spelling
+- `logs.cluster_attribute` — tenant's log cluster attribute spelling
+- `logs.platform_namespaces` — platform namespaces present in this tenant
+- `logs.all_discovered_namespaces` — every namespace seen in logs (cap 50)
+
+**How it works:**
+1. `learn_account` task 31 probes `Log` events for which namespace attribute convention exists (`namespace_name`, `k8s.namespace.name`, or `kubernetes.namespace_name`).
+2. `learn_account` task 32 enumerates all namespaces present in `Log` events and intersects with `KNOWN_PLATFORM_NAMESPACES` (a code-level allowlist of canonical K8s platform namespaces).
+3. `search_logs` Step 0c activates after Step 0b returns zero when the target is a platform component (keyword match or no APM entity). It queries logs filtered by the tenant's discovered platform namespaces.
+4. Responses include `platform_log_source: true` so agents can apply Envoy response\_flags interpretation.
+
 ***
 
 ## Developer Guide

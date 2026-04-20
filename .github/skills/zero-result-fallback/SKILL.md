@@ -31,9 +31,9 @@ ALL applicable fallbacks are exhausted.
 | `FROM Log WHERE entity.name = '{service}'` | `FROM Log WHERE service.name = '{service}'` |
 | `FROM Log WHERE service.name = '{service}'` | `FROM Log WHERE message LIKE '%{bare_name}%'` |
 | `FROM Log WHERE appName = '{service}'` | `FROM Log WHERE entity.name = '{service}'` |
-| `search_logs` returns zero for Istio/ingress/K8s system service | These are infrastructure logs, not APM service logs. Try: `SELECT uniques(namespace_name) FROM Log WHERE cluster_name LIKE '%{cluster}%' SINCE 30 minutes ago LIMIT 1` to discover namespaces, then query by `namespace_name = 'istio-system'` |
-| `search_logs` returns zero and service is platform-level (no APM entity) | Run namespace discovery — platform logs are tagged by `namespace_name` and `cluster_name`, not `entity.name` or `appName` |
-| Istio 5xx alert but no logs found for the domain name | Do NOT search by domain name. Search by `namespace_name = 'istio-system'` and filter by `status >= 500` |
+| `search_logs` returns zero for Istio/ingress/K8s system service | `search_logs` now auto-discovers platform namespaces and runs a namespace-based fallback (Step 0c). If it still returns zero, the platform logs are not forwarded to NR — escalate to the log pipeline team. |
+| `search_logs` returns zero and service is platform-level (no APM entity) | `search_logs` auto-runs platform-namespace fallback when the target has no APM entity. If it still returns zero, check `learn_account` output for `logs.platform_namespaces` — if empty, platform log forwarding is not configured. |
+| Istio 5xx alert but no logs found for the domain name | `search_logs` now queries platform namespaces automatically. If `platform_log_source: true` in the response, interpret via the Envoy response_flags table. If still zero, platform logs are not forwarded to NR. |
 
 **Infrastructure:**
 | If this returns zero | Try this instead |

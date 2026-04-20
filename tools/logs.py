@@ -234,6 +234,102 @@ async def search_logs(
                     )
                     continue
 
+        # ── Step 0c: Platform log discovery ──
+        # When Steps 0b exhausted and the target looks like a platform
+        # component (Istio, ingress, kube-system, etc.), query logs by
+        # discovered platform namespaces instead of service attributes.
+        platform_log_source = False
+        _PLATFORM_KEYWORDS = frozenset({
+            "istio", "ingress", "gateway", "kube-", "nginx",
+            "envoy", "linkerd", "traefik", "kong",
+        })
+        if (
+            not logs
+            and intelligence.logs.platform_namespaces
+            and intelligence.logs.namespace_attribute
+        ):
+            # Trigger decision: activate if the target is a platform hint
+            # or has no APM entity match.  Check the ORIGINAL service_name
+            # for keyword matches — fuzzy resolution may have mapped a
+            # platform component name (e.g. "envoy-proxy") to an unrelated
+            # APM service.
+            _trigger = False
+            _original_lower = (service_name or "").lower()
+            if resolved_name is None:
+                _trigger = True
+            elif any(kw in _original_lower for kw in _PLATFORM_KEYWORDS):
+                _trigger = True
+            elif any(kw in (resolved_name or "").lower() for kw in _PLATFORM_KEYWORDS):
+                _trigger = True
+            elif (
+                resolved_name not in intelligence.apm.service_names
+                and resolved_name not in intelligence.apm.service_guids
+            ):
+                _trigger = True
+
+            if _trigger:
+                try:
+                    ns_attr = intelligence.logs.namespace_attribute
+                    cl_attr = intelligence.logs.cluster_attribute
+                    platform_ns = intelligence.logs.platform_namespaces
+
+                    namespaces_csv = ", ".join(f"'{ns}'" for ns in platform_ns)
+
+                    # Build the Step 0c NRQL query.
+                    step_0c_nrql = (
+                        f"SELECT timestamp, message, `{ns_attr}`, `{cl_attr}`, `{sev_attr}`,"
+                        f" status, path, method, vhost, response_flags,"
+                        f" response_code_details, upstream_cluster, upstream_host"
+                        f" FROM Log"
+                        f" WHERE `{ns_attr}` IN ({namespaces_csv})"
+                    )
+
+                    # Optional cluster filter for precision.
+                    if intelligence.k8s.cluster_names:
+                        first_cluster = intelligence.k8s.cluster_names[0]
+                        step_0c_nrql += f" AND `{cl_attr}` LIKE '%{first_cluster}%'"
+
+                    if severity:
+                        safe_severity = sanitize_nrql_string(severity)
+                        levels = [f"'{s.strip()}'" for s in safe_severity.split(",")]
+                        step_0c_nrql += NRQL_LOG_SEVERITY_FILTER % (sev_attr, ", ".join(levels))
+
+                    if keyword:
+                        safe_keyword = sanitize_nrql_string(keyword)
+                        step_0c_nrql += NRQL_LOG_KEYWORD_FILTER % safe_keyword
+
+                    step_0c_nrql += NRQL_LOG_SINCE % since_minutes
+                    step_0c_nrql += NRQL_LOG_ORDER
+                    step_0c_nrql += NRQL_LOG_LIMIT % min(limit, 500)
+
+                    escaped_0c = step_0c_nrql.replace('"', '\\"')
+                    query_0c = GQL_NRQL_QUERY % (credentials.account_id, escaped_0c)
+                    result_0c = await client.query(query_0c)
+                    platform_logs = (
+                        result_0c.get("data", {})
+                        .get("actor", {})
+                        .get("account", {})
+                        .get("nrql", {})
+                        .get("results", [])
+                    )
+
+                    if platform_logs:
+                        logs = platform_logs
+                        nrql = step_0c_nrql
+                        used_fallback_attr = ns_attr
+                        platform_log_source = True
+                        logger.info(
+                            "Step 0c platform log fallback found %d logs "
+                            "via namespaces %s using '%s'",
+                            len(platform_logs),
+                            ", ".join(platform_ns),
+                            ns_attr,
+                        )
+                except Exception as step_0c_exc:
+                    logger.warning(
+                        "Step 0c platform log fallback failed: %s", step_0c_exc,
+                    )
+
         duration_ms = int((time.time() - start) * 1000)
         response: dict = {
             "account_id": credentials.account_id,
@@ -253,6 +349,15 @@ async def search_logs(
             response["note"] = response.get("note", "") + (
                 f" Logs found via '{used_fallback_attr}' attribute"
                 f" (primary '{intelligence.logs.service_attribute}' had no results)."
+            )
+        if platform_log_source:
+            response["platform_log_source"] = True
+            platform_ns = intelligence.logs.platform_namespaces
+            ns_attr = intelligence.logs.namespace_attribute
+            response["note"] = (
+                response.get("note", "")
+                + f" Platform log fallback: queried namespaces"
+                f" {', '.join(platform_ns)} via '{ns_attr}'."
             )
 
         # Deep links — only when logs were found.

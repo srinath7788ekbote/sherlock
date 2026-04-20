@@ -123,49 +123,17 @@ LOGS_RESULT: {
 }
 ```
 
-### Step 0c — Infrastructure Namespace Log Search (runs when Step 0b also returns zero)
+### Step 0c — Platform Namespace Log Search (now automatic)
 
-For infrastructure/platform components (Istio, K8s system, ingress controllers,
-etc.), logs are tagged by `namespace_name` and `cluster_name` — NOT by any
-APM service attribute. `search_logs` cannot find these logs.
+`search_logs` automatically discovers and queries platform namespaces (Istio,
+ingress-nginx, kube-system, etc.) when Steps 0a/0b return zero results and the
+target looks like a platform component. This discovery is built into the tool
+via `learn_account` tasks 31-32 which probe namespace attributes and enumerate
+platform namespaces at connect time.
 
-**When to trigger:** The investigated alert mentions Istio, ingress, K8s system,
-nginx, envoy, or any platform component; OR `search_logs` returns zero after
-Steps 0b/0c exhausted all service attribute fallbacks.
-
-**Step 1 — Discover what log namespaces exist in the cluster:**
-```nrql
-SELECT uniques(namespace_name, 30), uniques(cluster_name, 10)
-FROM Log
-WHERE cluster_name LIKE '%{cluster_bare_name}%'
-SINCE 30 minutes ago
-LIMIT 1
-```
-Where `{cluster_bare_name}` is derived from:
-- `learn_account` response → `k8s.cluster_names[0]`
-- Or from the alert target (e.g. `aks-eus2-prd-eswd-tngo`)
-
-**Step 2 — If `istio-system` namespace found, query Istio access logs:**
-```nrql
-SELECT count(*) FROM Log
-WHERE namespace_name = 'istio-system'
-AND status >= 500
-SINCE {since_minutes} minutes ago
-TIMESERIES 5 minutes
-FACET vhost, status
-```
-
-**Step 3 — Get structured Istio error details:**
-```nrql
-SELECT count(*) FROM Log
-WHERE namespace_name = 'istio-system'
-AND status >= 500
-SINCE {since_minutes} minutes ago
-FACET path, response_flags, response_code_details, upstream_cluster_raw
-LIMIT 20
-```
-
-**Step 4 — Interpret Istio response_flags and response_code_details:**
+**If `search_logs` returns results with `platform_log_source: true`**, interpret
+them using the Envoy response_flags table below — these are infrastructure
+access logs, not application logs.
 
 | `response_flags` | Meaning |
 |-----------------|--------|
@@ -181,28 +149,11 @@ LIMIT 20
 | `upstream_reset_before_response_started` | Backend crashed mid-request |
 | `stream_idle_timeout` | Upstream took too long |
 
-**Step 5 — Find the affected service by upstream_cluster:**
-```nrql
-SELECT count(*) FROM Log
-WHERE namespace_name = 'istio-system'
-AND status >= 500
-SINCE {since_minutes} minutes ago
-FACET upstream_cluster_raw, vhost
-LIMIT 10
-```
-The `upstream_cluster_raw` value (e.g. `tagging-service.eswd-prod|http|80`)
-identifies which backend service is actually failing.
+**To find the affected service**, look at `upstream_cluster` in the returned
+log entries (e.g. `web-api.app-prod|http|80` identifies the backend service).
 
-**Reporting format when infrastructure logs found:**
-```
-Logs — 🔴 Istio access logs found (namespace: istio-system)
-  {N} errors in {window} minutes
-  response_flags: '-' (via_upstream) — 500 from app, not Istio
-  upstream_cluster: tagging-service.eswd-prod — ORIGIN service
-  [View Istio errors](nrql_chart link)
-```
-
-**Only declare NO_DATA** if namespace discovery query also returns zero.
+**Only declare NO_DATA** if `search_logs` returns zero even after platform
+fallback — meaning the platform logs are not forwarded to New Relic.
 
 ### Step 1 — Search Logs (MANDATORY FIRST)
 

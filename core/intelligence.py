@@ -353,6 +353,25 @@ NRQL_LOG_ATTR_PROBE = (
     + " FROM Log SINCE 1 day ago"
 )
 
+# Platform log namespace/cluster attribute probe — detects which attribute
+# spelling the tenant's log forwarder uses (Fluent Bit, OTel, or Fluentd).
+NRQL_LOG_NAMESPACE_PROBE = (
+    "SELECT count(*) as total,"
+    " filter(count(*), WHERE namespace_name IS NOT NULL) as has_plain,"
+    " filter(count(*), WHERE `k8s.namespace.name` IS NOT NULL) as has_k8s_prefix,"
+    " filter(count(*), WHERE `kubernetes.namespace_name` IS NOT NULL) as has_kubernetes_prefix"
+    " FROM Log SINCE 1 hour ago LIMIT 1"
+)
+
+# Platform log namespace enumeration — discovers all namespaces present in
+# Log events using all three attribute conventions simultaneously.
+NRQL_LOG_NAMESPACE_ENUMERATION = (
+    "SELECT uniques(namespace_name, 50) as plain_ns,"
+    " uniques(`k8s.namespace.name`, 50) as k8s_ns,"
+    " uniques(`kubernetes.namespace_name`, 50) as kubernetes_ns"
+    " FROM Log SINCE 1 hour ago LIMIT 1"
+)
+
 NRQL_TOP_ERRORS = (
     "SELECT count(*) FROM TransactionError"
     " FACET error.class SINCE 7 days ago LIMIT 20"
@@ -416,6 +435,49 @@ SEVERITY_ATTR_CANDIDATES = [
     "loglevel", "priority",
 ]
 
+# Canonical Kubernetes platform-component namespaces. Tenant-agnostic:
+# every tenant running Istio has 'istio-system'; every tenant running
+# Linkerd has 'linkerd' / 'linkerd-control-plane'; etc. This list is a
+# filter over discovered namespaces, NOT a configuration — a tenant
+# that does not run a given platform component will simply not have
+# that namespace in their discovered set.
+KNOWN_PLATFORM_NAMESPACES: frozenset[str] = frozenset({
+    # Service meshes
+    "istio-system",
+    "istio-gateway",
+    "linkerd",
+    "linkerd-control-plane",
+    "linkerd-viz",
+    "linkerd-jaeger",
+    "consul",
+    "consul-system",
+    "cilium",
+    "cilium-system",
+    "kuma-system",
+    # Ingress controllers
+    "ingress-nginx",
+    "nginx-ingress",
+    "kong",
+    "kong-system",
+    "traefik",
+    "traefik-system",
+    "contour",
+    "projectcontour",
+    "gloo-system",
+    "haproxy-controller",
+    # Core Kubernetes
+    "kube-system",
+    "kube-public",
+    "kube-node-lease",
+    # Observability / platform
+    "monitoring",
+    "observability",
+    "cert-manager",
+    "external-dns",
+    "argocd",
+    "flux-system",
+})
+
 
 # ── Pydantic Models ─────────────────────────────────────────────────────
 
@@ -465,6 +527,26 @@ class LogsIntelligence(BaseModel):
     service_attribute: str = ""
     severity_attribute: str = ""
     top_error_messages: list[str] = Field(default_factory=list)
+
+    # Platform log discovery (Step 0c)
+    namespace_attribute: str = ""
+    """Tenant's log namespace attribute spelling — one of:
+    'namespace_name' (Fluent Bit), 'k8s.namespace.name' (OTel k8sattributes),
+    'kubernetes.namespace_name' (older Fluentd), or '' if no K8s logs."""
+
+    cluster_attribute: str = ""
+    """Tenant's log cluster attribute spelling — paired with namespace_attribute.
+    One of: 'cluster_name', 'k8s.cluster.name', 'kubernetes.cluster_name', or ''."""
+
+    platform_namespaces: list[str] = Field(default_factory=list)
+    """Kubernetes platform namespaces discovered in this tenant's logs.
+    Intersected against KNOWN_PLATFORM_NAMESPACES. Empty when no K8s logs
+    or no platform components forward logs to NR."""
+
+    all_discovered_namespaces: list[str] = Field(default_factory=list)
+    """Every K8s namespace name observed in Log events during learn_account.
+    Superset of platform_namespaces. Useful for debugging why a namespace
+    was not classified as platform. Capped at 50 for response-size safety."""
 
 
 class SyntheticMonitorMeta(BaseModel):
@@ -826,6 +908,58 @@ def detect_cross_account_entities(
             ))
 
     return cross
+
+
+def _parse_log_namespace_intelligence(
+    probe_row: dict,
+    enumeration_row: dict,
+) -> tuple[str, str, list[str], list[str]]:
+    """Parse log namespace/cluster attribute probe and enumeration results.
+
+    Called from learn_account after the parallel gather completes.
+    Returns the discovered namespace_attribute, cluster_attribute,
+    platform_namespaces, and all_discovered_namespaces.
+
+    Args:
+        probe_row: First row from NRQL_LOG_NAMESPACE_PROBE query.
+        enumeration_row: First row from NRQL_LOG_NAMESPACE_ENUMERATION query.
+
+    Returns:
+        Tuple of (namespace_attribute, cluster_attribute,
+        platform_namespaces, all_discovered_namespaces).
+    """
+    # Pick whichever attribute convention has the highest non-null count.
+    candidates = [
+        ("namespace_name", "cluster_name",
+         probe_row.get("has_plain", 0) or 0),
+        ("k8s.namespace.name", "k8s.cluster.name",
+         probe_row.get("has_k8s_prefix", 0) or 0),
+        ("kubernetes.namespace_name", "kubernetes.cluster_name",
+         probe_row.get("has_kubernetes_prefix", 0) or 0),
+    ]
+    best = max(candidates, key=lambda c: c[2])
+
+    namespace_attr = ""
+    cluster_attr = ""
+    if best[2] > 0:
+        namespace_attr = best[0]
+        cluster_attr = best[1]
+
+    # Pick the namespace list matching the chosen attribute.
+    if namespace_attr == "namespace_name":
+        discovered_ns = enumeration_row.get("plain_ns", []) or []
+    elif namespace_attr == "k8s.namespace.name":
+        discovered_ns = enumeration_row.get("k8s_ns", []) or []
+    elif namespace_attr == "kubernetes.namespace_name":
+        discovered_ns = enumeration_row.get("kubernetes_ns", []) or []
+    else:
+        discovered_ns = []
+
+    # Dedupe, cap at 50, filter against allowlist.
+    discovered_ns = list(dict.fromkeys(str(n) for n in discovered_ns if n))[:50]
+    platform_ns = sorted(n for n in discovered_ns if n in KNOWN_PLATFORM_NAMESPACES)
+
+    return namespace_attr, cluster_attr, platform_ns, discovered_ns
 
 
 def _parse_asb_intelligence(
@@ -1568,6 +1702,8 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
             _nrql(NRQL_ASB_QUEUES),                              # 28: ASB queues
             _nrql(NRQL_ASB_TOPICS),                              # 29: ASB topics
             _nrql(NRQL_ASB_NAMESPACES),                          # 30: ASB namespace names
+            _nrql(NRQL_LOG_NAMESPACE_PROBE),             # 31: log ns attr probe
+            _nrql(NRQL_LOG_NAMESPACE_ENUMERATION),       # 32: log ns enumeration
             return_exceptions=True,
         )
     except Exception as exc:
@@ -1990,6 +2126,38 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
         )
     except Exception:
         pass  # Non-Azure accounts silently get configured=False
+
+    # ── 31-32: Platform Log Namespace Discovery ──────────────────────────
+    try:
+        probe_row = {}
+        if not isinstance(results[31], BaseException) and results[31]:
+            probe_row = results[31][0] if results[31] else {}
+
+        enum_row = {}
+        if not isinstance(results[32], BaseException) and results[32]:
+            enum_row = results[32][0] if results[32] else {}
+
+        ns_attr, cl_attr, platform_ns, all_ns = _parse_log_namespace_intelligence(
+            probe_row=probe_row,
+            enumeration_row=enum_row,
+        )
+        intel.logs.namespace_attribute = ns_attr
+        intel.logs.cluster_attribute = cl_attr
+        intel.logs.platform_namespaces = platform_ns
+        intel.logs.all_discovered_namespaces = all_ns
+
+        if platform_ns:
+            logger.info(
+                "Platform log discovery: namespace_attr=%s, %d platform namespaces: %s",
+                ns_attr, len(platform_ns), ", ".join(platform_ns),
+            )
+        elif ns_attr:
+            logger.debug(
+                "Platform log discovery: namespace_attr=%s, no platform namespaces found",
+                ns_attr,
+            )
+    except Exception:
+        pass  # Platform log discovery failure must not abort the gather
 
     # ── Learn Naming Convention (feed ALL entity names) ──
     try:

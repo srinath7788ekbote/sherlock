@@ -367,6 +367,15 @@ async def learn_account_tool() -> str:
             "mobile_apps": intelligence.mobile.app_count,
             "workloads": intelligence.workloads.workload_count,
             "logs_enabled": intelligence.logs.enabled,
+            "logs": {
+                "enabled": intelligence.logs.enabled,
+                "service_attribute": intelligence.logs.service_attribute,
+                "severity_attribute": intelligence.logs.severity_attribute,
+                "namespace_attribute": intelligence.logs.namespace_attribute,
+                "cluster_attribute": intelligence.logs.cluster_attribute,
+                "platform_namespaces": intelligence.logs.platform_namespaces,
+                "all_discovered_namespaces": intelligence.logs.all_discovered_namespaces,
+            },
             "duration_ms": duration_ms,
         }
 
@@ -485,6 +494,10 @@ async def get_account_summary() -> str:
                 "service_attribute": intelligence.logs.service_attribute,
                 "severity_attribute": intelligence.logs.severity_attribute,
                 "top_error_messages": intelligence.logs.top_error_messages,
+                "namespace_attribute": intelligence.logs.namespace_attribute,
+                "cluster_attribute": intelligence.logs.cluster_attribute,
+                "platform_namespaces": intelligence.logs.platform_namespaces,
+                "all_discovered_namespaces": intelligence.logs.all_discovered_namespaces,
             },
             "synthetics": {
                 "enabled": intelligence.synthetics.enabled,
