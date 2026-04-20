@@ -34,6 +34,7 @@ cache/
 
 # Sherlock local data directory
 .sherlock/
+CLAUDE_STATE.md
 
 # Keyring
 *.keyring

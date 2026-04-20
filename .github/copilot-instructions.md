@@ -640,3 +640,21 @@ The following are always session-specific and must never be assumed stable:
 - Cross-account entity list (changes when you connect to different accounts)
 - Investigation timestamps and windows
 - Open incident IDs
+
+---
+
+## CLAUDE_STATE.md Update Rule
+
+After completing any task that results in one or more of these changes:
+- MCP tool added or removed
+- Test added or removed
+- Agent added or removed
+- Skill added or removed
+- Enhancement/Improvement or Restructure
+- Known bug fixed or new bug found
+- New tool installed or configured
+
+Update CLAUDE_STATE.md in the repo root as the LAST step, after doc-sync.
+Recount from actual code (count @mcp.tool() decorators, count def test_ functions).
+Only update the fields that changed. Update the "Last updated" date.
+Do not rewrite sections that did not change.
