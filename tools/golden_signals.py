@@ -379,7 +379,9 @@ async def get_service_golden_signals(
                         f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
                     )
                 response["links"] = {
-                    "service_overview": _builder.entity_link(_guid) if _guid else None,
+                    "service_overview": _builder.apm_overview(_guid, since_minutes) if _guid else None,
+                    "errors_inbox": _builder.apm_errors(_guid, since_minutes) if _guid else None,
+                    "transactions": _builder.apm_transactions(_guid, since_minutes) if _guid else None,
                     "error_chart": _builder.nrql_chart(_err_nrql, since_minutes),
                     "latency_chart": _builder.nrql_chart(_p95_nrql, since_minutes),
                     "throughput_chart": _builder.nrql_chart(_tput_nrql, since_minutes),

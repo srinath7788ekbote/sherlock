@@ -255,10 +255,35 @@ class DeepLinkBuilder:
             return None
 
     def k8s_workload(
-        self, namespace: str, deployment_name: str, *, cluster: str | None = None,
+        self, namespace: str, deployment_name: str, *,
+        cluster: str | None = None, deployment_guid: str | None = None,
     ) -> str | None:
-        """Open K8s view filtered to a specific deployment."""
+        """Open K8s view filtered to a specific deployment.
+
+        When ``deployment_guid`` is supplied, routes to the canonical
+        ``k8s-deployment-overview/{guid}`` entity view URL.  Falls back
+        to an entity-search filter URL when GUID is not known.
+        """
         try:
+            if deployment_guid:
+                # Canonical entity view with filter expression.
+                filter_parts = [
+                    f"(name LIKE '{deployment_name}' OR id = '{deployment_name}'"
+                    f" OR domainId = '{deployment_name}')",
+                    "(domain = 'INFRA' AND type = 'KUBERNETES_DEPLOYMENT')",
+                    f"`tags.namespace` = '{namespace}'",
+                ]
+                if cluster:
+                    filter_parts.append(f"`tags.clusterName` = '{cluster}'")
+                filter_expr = " AND ".join(filter_parts)
+                return (
+                    f"{self._base}/nr1-core/kubernetes-cluster-explorer/"
+                    f"k8s-deployment-overview/{deployment_guid}"
+                    f"?account={self._account_id}"
+                    f"&filters={urllib.parse.quote(filter_expr, safe='')}"
+                )
+
+            # Fallback: entity search with filter expression.
             filter_expr = (
                 f"{self._k8s_base_filter()}"
                 f" AND tags.namespaceName = '{namespace}'"
@@ -343,7 +368,69 @@ class DeepLinkBuilder:
         except Exception:
             return None
 
-    # ── NRQL-based log links (preferred) ───────────────────────────
+    # ── Log UI links (entity view) ────────────────────────────────
+
+    def log_search_ui(
+        self,
+        service_name: str | None = None,
+        service_attribute: str = "entity.name",
+        severity: str | None = None,
+        keyword: str | None = None,
+        namespace: str | None = None,
+        cluster: str | None = None,
+        since_minutes: int = 60,
+    ) -> str | None:
+        """Open the New Relic Logs UI (logger.log-tailer nerdlet) with a
+        pre-filtered query.
+
+        Unlike log_search_nrql() which opens the NRQL query builder,
+        this method opens the actual Logs UI with the log stream viewer,
+        timeline histogram, and pattern summary.
+
+        Builds a filter string using NR Logs query language (Lucene-style).
+        All parameters are optional — omitting all produces an unfiltered
+        Logs UI link.
+        """
+        try:
+            parts: list[str] = []
+            if service_name and service_attribute:
+                parts.append(f'{service_attribute}:"{service_name}"')
+            if severity:
+                levels = [s.strip() for s in severity.split(",") if s.strip()]
+                if len(levels) == 1:
+                    parts.append(f'level:"{levels[0]}"')
+                elif len(levels) > 1:
+                    parts.append(
+                        "(" + " OR ".join(f'level:"{lv}"' for lv in levels) + ")"
+                    )
+            if keyword:
+                parts.append(f'message:"{keyword}"')
+            if namespace:
+                parts.append(f'namespace_name:"{namespace}"')
+            if cluster:
+                parts.append(f'cluster_name:"{cluster}"')
+
+            query = " AND ".join(parts) if parts else ""
+
+            pane = json.dumps(
+                {
+                    "nerdletId": "logger.log-tailer",
+                    "accountId": int(self._account_id),
+                    "duration": since_minutes * 60 * 1000,
+                    "query": query,
+                },
+                separators=(",", ":"),
+            )
+            pane_b64 = base64.b64encode(pane.encode()).decode()
+            return (
+                f"{self._base}/launcher/logger.log-tailer"
+                f"?pane={urllib.parse.quote(pane_b64, safe='')}"
+                f"&platform[accountId]={self._account_id}"
+            )
+        except Exception:
+            return None
+
+    # ── NRQL-based log links (query builder) ───────────────────────
 
     def log_search_nrql(
         self,

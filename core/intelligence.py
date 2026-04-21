@@ -1775,6 +1775,12 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
                     intel.apm.service_names.append(name)
                     guid = ent.get("guid", "")
                     if guid:
+                        # TODO(fix-apm-guid-cross-cluster-ambiguity): When multiple APM apps
+                        # share a similar name across clusters (e.g. east-prod/gateway and
+                        # eswd-prod/gateway), fuzzy resolution may pick the wrong GUID.
+                        # Apr 20 2026 DFIN_AD investigation surfaced this: entity.name lookup
+                        # returned the wrong app_id for the gateway service. Follow-up PR should
+                        # disambiguate by cluster tag or account-level uniqueness check.
                         intel.apm.service_guids[name] = guid
                 tags = {t["key"]: t.get("values", []) for t in ent.get("tags", [])}
                 lang = tags.get("language", [""])[0] if tags.get("language") else ""

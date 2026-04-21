@@ -240,10 +240,10 @@ class TestLogDeepLink:
     """Verify search_logs generates NRQL-based deep links, not Lucene links."""
 
     @pytest.mark.asyncio
-    async def test_search_logs_link_uses_nrql_chart_not_log_tailer(
+    async def test_search_logs_link_uses_log_tailer_not_query_builder(
         self, logs_context
     ):
-        """Deep link must open Query Builder, not logger.log-tailer."""
+        """Deep link must open Logs UI (log-tailer), not Query Builder."""
         import respx
 
         log_data = _mock_nrql_response([
@@ -267,23 +267,20 @@ class TestLogDeepLink:
             )
         data = json.loads(result)
 
-        # Assert: link must route to the NRQL query-builder page.
+        # Assert: view_in_nr routes to the Logs UI entity view.
         assert "links" in data, "No links in response"
         view_link = data["links"].get("view_in_nr", "")
-        assert "/data-exploration" in view_link or "/query-builder" in view_link, (
-            f"Expected query-builder link, got: {view_link}"
+        assert "/launcher/logger.log-tailer" in view_link, (
+            f"Expected log-tailer link, got: {view_link}"
         )
+        # view_nrql should also be present for NRQL editor access.
+        assert "view_nrql" in data["links"], "Missing view_nrql link"
 
     @pytest.mark.asyncio
     async def test_search_logs_link_points_to_logger_page(
         self, logs_context
     ):
-        """Deep link must open the /logger page even when a keyword is used.
-
-        The /logger route is NR's canonical Logs UI path. A Lucene ``query``
-        parameter is pre-filled so the filter is applied on page load.
-        The full NRQL is also surfaced separately in the tool's response body.
-        """
+        """Deep link must open the Logs UI even when a keyword is used."""
         import respx
 
         log_data = _mock_nrql_response([
@@ -309,6 +306,6 @@ class TestLogDeepLink:
         view_link = data.get("links", {}).get("view_in_nr", "")
 
         assert view_link, "Expected a view link in response"
-        assert "/data-exploration" in view_link or "/query-builder" in view_link, (
-            f"Expected query-builder link, got: {view_link}"
+        assert "/launcher/logger.log-tailer" in view_link, (
+            f"Expected log-tailer link, got: {view_link}"
         )

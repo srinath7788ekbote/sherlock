@@ -296,6 +296,11 @@ class TestErrorResilience:
         # log_search_nrql
         result = builder_us.log_search_nrql(service_name="", service_attribute="", since_minutes=0)
         assert result is None or isinstance(result, str)
+        # log_search_ui
+        result = builder_us.log_search_ui()
+        assert result is None or isinstance(result, str)
+        result = builder_us.log_search_ui(service_name=None, severity=None)
+        assert result is None or isinstance(result, str)
         # k8s_explorer
         result = builder_us.k8s_explorer(None)
         assert result is None or isinstance(result, str)
@@ -579,4 +584,245 @@ class TestLogSearchNrql:
         )
         assert url is not None
         assert isinstance(url, str)
+
+
+# ── log_search_ui tests ─────────────────────────────────────────────────
+
+
+class TestLogSearchUi:
+    """log_search_ui() targets the logger.log-tailer nerdlet directly."""
+
+    def test_log_search_ui_returns_log_tailer_launcher_url(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(service_name="my-svc")
+        assert url is not None
+        assert "/launcher/logger.log-tailer" in url
+        assert "pane=" in url
+
+    def test_log_search_ui_service_name_filter(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(
+            service_name="web-api",
+            service_attribute="entity.name",
+        )
+        assert url is not None
+        # Decode the pane to verify query content.
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = urllib.parse.unquote(params["pane"][0])
+        # b64 may have missing padding
+        pane_b64 += "=" * (-len(pane_b64) % 4)
+        pane_data = json.loads(base64.b64decode(pane_b64))
+        assert 'entity.name:"web-api"' in pane_data["query"]
+
+    def test_log_search_ui_severity_filter_single(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(severity="ERROR")
+        assert url is not None
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = urllib.parse.unquote(params["pane"][0])
+        pane_b64 += "=" * (-len(pane_b64) % 4)
+        pane_data = json.loads(base64.b64decode(pane_b64))
+        assert 'level:"ERROR"' in pane_data["query"]
+        # Single severity should NOT have parentheses
+        assert "(" not in pane_data["query"]
+
+    def test_log_search_ui_severity_filter_multi(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(severity="ERROR,FATAL,CRITICAL")
+        assert url is not None
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = urllib.parse.unquote(params["pane"][0])
+        pane_b64 += "=" * (-len(pane_b64) % 4)
+        pane_data = json.loads(base64.b64decode(pane_b64))
+        assert "(" in pane_data["query"]
+        assert 'level:"ERROR"' in pane_data["query"]
+        assert 'level:"FATAL"' in pane_data["query"]
+        assert 'level:"CRITICAL"' in pane_data["query"]
+        assert " OR " in pane_data["query"]
+
+    def test_log_search_ui_keyword_filter(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(keyword="HikariPool")
+        assert url is not None
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = urllib.parse.unquote(params["pane"][0])
+        pane_b64 += "=" * (-len(pane_b64) % 4)
+        pane_data = json.loads(base64.b64decode(pane_b64))
+        assert 'message:"HikariPool"' in pane_data["query"]
+
+    def test_log_search_ui_namespace_and_cluster(self):
+        """Platform log pattern: no service_name, just namespace + cluster."""
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(
+            namespace="istio-system",
+            cluster="main-cluster",
+        )
+        assert url is not None
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = urllib.parse.unquote(params["pane"][0])
+        pane_b64 += "=" * (-len(pane_b64) % 4)
+        pane_data = json.loads(base64.b64decode(pane_b64))
+        assert 'namespace_name:"istio-system"' in pane_data["query"]
+        assert 'cluster_name:"main-cluster"' in pane_data["query"]
+        # No service filter
+        assert "entity.name" not in pane_data["query"]
+
+    def test_log_search_ui_empty_query_valid(self):
+        """No filters supplied still returns a working URL."""
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui()
+        assert url is not None
+        assert "/launcher/logger.log-tailer" in url
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = urllib.parse.unquote(params["pane"][0])
+        pane_b64 += "=" * (-len(pane_b64) % 4)
+        pane_data = json.loads(base64.b64decode(pane_b64))
+        assert pane_data["query"] == ""
+
+    def test_log_search_ui_dotted_attribute(self):
+        """entity.name attribute is used as-is in the query."""
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(
+            service_name="my-svc",
+            service_attribute="entity.name",
+        )
+        assert url is not None
+        parsed = urllib.parse.urlparse(url)
+        params = urllib.parse.parse_qs(parsed.query)
+        pane_b64 = urllib.parse.unquote(params["pane"][0])
+        pane_b64 += "=" * (-len(pane_b64) % 4)
+        pane_data = json.loads(base64.b64decode(pane_b64))
+        assert pane_data["query"].startswith('entity.name:"my-svc"')
+
+    def test_log_search_ui_eu_region(self):
+        builder = DeepLinkBuilder(account_id="789012", region="EU")
+        url = builder.log_search_ui(service_name="my-svc")
+        assert url is not None
+        assert url.startswith(NR_BASE_EU)
+        assert "/launcher/logger.log-tailer" in url
+
+    def test_log_search_ui_contains_account_id(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.log_search_ui(service_name="my-svc")
+        assert "platform[accountId]=123456" in url
+
+
+# ── K8s workload with deployment GUID tests ──────────────────────────────
+
+
+class TestK8sWorkloadWithGuid:
+    """k8s_workload() with optional deployment_guid parameter."""
+
+    def test_k8s_workload_with_guid_uses_entity_view_url(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.k8s_workload(
+            "payments-prod", "payment-svc",
+            deployment_guid="K8S-DEPLOY-GUID-001",
+        )
+        assert url is not None
+        assert "/nr1-core/kubernetes-cluster-explorer/k8s-deployment-overview/K8S-DEPLOY-GUID-001" in url
+        assert "account=123456" in url
+
+    def test_k8s_workload_without_guid_uses_fallback_filter_url(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.k8s_workload("payments-prod", "payment-svc")
+        assert url is not None
+        assert "/nr1-core" in url
+        decoded = urllib.parse.unquote(url)
+        assert "deploymentName" in decoded
+        assert "payment-svc" in decoded
+        # Should NOT contain k8s-deployment-overview (no GUID).
+        assert "k8s-deployment-overview" not in url
+
+    def test_k8s_workload_with_guid_and_cluster_includes_cluster_tag(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.k8s_workload(
+            "payments-prod", "payment-svc",
+            deployment_guid="K8S-DEPLOY-GUID-001",
+            cluster="cluster-a",
+        )
+        assert url is not None
+        decoded = urllib.parse.unquote(url)
+        assert "`tags.clusterName` = 'cluster-a'" in decoded
+
+    def test_k8s_workload_filter_includes_backticked_namespace_tag(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.k8s_workload(
+            "payments-prod", "payment-svc",
+            deployment_guid="K8S-DEPLOY-GUID-001",
+        )
+        assert url is not None
+        decoded = urllib.parse.unquote(url)
+        assert "`tags.namespace` = 'payments-prod'" in decoded
+
+    def test_k8s_workload_without_guid_with_cluster(self):
+        """Fallback path also threads cluster into filter."""
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.k8s_workload(
+            "payments-prod", "payment-svc",
+            cluster="main-cluster",
+        )
+        assert url is not None
+        decoded = urllib.parse.unquote(url)
+        assert "clusterName" in decoded
+        assert "main-cluster" in decoded
+
+
+# ── Routing invariant tests (AST-based regression prevention) ────────────
+
+
+class TestRoutingInvariants:
+    """Guardrails that prevent named-entity links from routing through nrql_chart."""
+
+    _ENTITY_VIEW_KEYS = frozenset({
+        "service_overview", "errors_inbox", "workload_view",
+        "view_in_nr", "error_logs",
+    })
+
+    def test_nrql_chart_only_used_for_chart_suffix_keys(self):
+        """Parse tools/ source files and assert that entity-view keys
+        never route through nrql_chart().
+
+        Any response dict key in _ENTITY_VIEW_KEYS must NOT have
+        nrql_chart on the same assignment line.
+        """
+        import pathlib
+        violations = []
+        for path in pathlib.Path("tools").rglob("*.py"):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                for key in self._ENTITY_VIEW_KEYS:
+                    if f'"{key}"' in stripped and "nrql_chart" in stripped:
+                        violations.append(f"{path}:{i}: {stripped}")
+        assert violations == [], (
+            "Entity-view keys must NOT route through nrql_chart():\n"
+            + "\n".join(violations)
+        )
+
+    def test_no_tool_response_dict_has_log_search_lucene_key(self):
+        """log_search() (Lucene) is retired — no tool should call it.
+
+        log_search_nrql() and log_search_ui() are the valid replacements.
+        """
+        import pathlib
+        violations = []
+        for path in pathlib.Path("tools").rglob("*.py"):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                # Match _builder.log_search( but NOT log_search_nrql or log_search_ui
+                if ".log_search(" in stripped:
+                    if ".log_search_nrql(" not in stripped and ".log_search_ui(" not in stripped:
+                        violations.append(f"{path}:{i}: {stripped}")
+        assert violations == [], (
+            "Retired log_search() (Lucene) still referenced in tools:\n"
+            + "\n".join(violations)
+        )
 

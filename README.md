@@ -52,6 +52,7 @@ This MCP server exposes **23 tools** that let an AI assistant query your New Rel
 * **Parallel data fetching** — domain agents operate concurrently for speed
 * **Credential security** — API keys stored in OS keychain via `keyring`, never in plain text
 * **Deep links** — every finding includes a clickable URL to the exact New Relic UI view
+* **Deep link routing** — named-entity links open entity views (APM overview, K8s explorer, Logs UI); chart/NRQL links open the query builder
 * **Service dependency mapping** — automatic dependency graph built from spans, logs, and naming patterns
 * **OTel service detection** — automatic fallback to `Span`-based queries for OpenTelemetry-instrumented services
 * **Zero-result fallback** — mandatory multi-attempt fallback ladder before reporting NO\_DATA for any domain
@@ -533,6 +534,16 @@ Response shape additions:
 | #  | Tool                       | Description                                                                                                                     |
 | -- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | 23 | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
+
+### Deep Link Routing
+
+Sherlock distinguishes two categories of deep links:
+
+**Entity views** (primary recommendations) — open the canonical NR1 view for an entity: APM service overview, K8s deployment detail, Logs UI. Response dict keys: `service_overview`, `errors_inbox`, `workload_view`, `view_in_nr`.
+
+**NRQL queries and charts** (supporting evidence) — open the NRQL query builder pre-loaded with the query Sherlock used. Response dict keys: `error_chart`, `latency_chart`, `restart_chart`, `view_nrql`.
+
+The Team Lead synthesis prefers entity-view links for top-level recommendations and uses chart links only when the chart itself is the evidence being cited.
 
 ***
 

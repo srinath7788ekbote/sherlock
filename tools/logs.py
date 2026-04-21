@@ -365,36 +365,65 @@ async def search_logs(
             try:
                 _builder = _get_deeplink_builder()
                 if _builder:
-                    # Use log_search_nrql to route through the canonical
-                    # /logger page (verified working 2026-04). This opens
-                    # the NR Logs UI with a Lucene filter applied on the
-                    # service attribute — the page NR users expect when
-                    # investigating logs. The full NRQL is still included
-                    # in ``nrql_used`` for engineers who want to run the
-                    # query in the Query Builder directly.
                     service_attr = (
                         used_fallback_attr or intelligence.logs.service_attribute
                     )
-                    response["links"] = {
-                        "view_in_nr": _builder.log_search_nrql(
-                            service_name=resolved_name,
-                            service_attribute=service_attr,
-                            severity=severity,
-                            keyword=keyword,
-                            since_minutes=since_minutes,
-                        ),
-                    }
+
+                    if platform_log_source:
+                        # Step 0c: platform logs — scope by namespace/cluster,
+                        # not service name.
+                        _platform_ns = intelligence.logs.platform_namespaces
+                        _first_ns = _platform_ns[0] if _platform_ns else None
+                        _first_cluster = (
+                            intelligence.k8s.cluster_names[0]
+                            if intelligence.k8s.cluster_names
+                            else None
+                        )
+                        response["links"] = {
+                            "view_in_nr": _builder.log_search_ui(
+                                namespace=_first_ns,
+                                cluster=_first_cluster,
+                                severity=severity,
+                                keyword=keyword,
+                                since_minutes=since_minutes,
+                            ),
+                            "view_nrql": _builder.log_search_nrql(
+                                service_name=resolved_name,
+                                service_attribute=service_attr,
+                                severity=severity,
+                                keyword=keyword,
+                                since_minutes=since_minutes,
+                            ),
+                        }
+                    else:
+                        # Step 0b: service logs — scope by service name.
+                        response["links"] = {
+                            "view_in_nr": _builder.log_search_ui(
+                                service_name=resolved_name,
+                                service_attribute=service_attr,
+                                severity=severity,
+                                keyword=keyword,
+                                since_minutes=since_minutes,
+                            ),
+                            "view_nrql": _builder.log_search_nrql(
+                                service_name=resolved_name,
+                                service_attribute=service_attr,
+                                severity=severity,
+                                keyword=keyword,
+                                since_minutes=since_minutes,
+                            ),
+                        }
+
                     # If there are errors in the results, generate an error-only link
                     has_errors = any(
                         str(log.get(sev_attr, "")).upper() in ("ERROR", "FATAL", "CRITICAL")
                         for log in logs
                     )
                     if has_errors:
-                        response["links"]["error_logs"] = _builder.log_search_nrql(
+                        response["links"]["error_logs"] = _builder.log_search_ui(
                             service_name=resolved_name,
                             service_attribute=service_attr,
                             severity="ERROR,FATAL,CRITICAL",
-                            keyword=keyword,
                             since_minutes=since_minutes,
                         )
             except Exception:
