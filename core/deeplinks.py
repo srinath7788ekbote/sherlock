@@ -234,13 +234,17 @@ class DeepLinkBuilder:
             f" AND type IN ({self._K8S_ENTITY_TYPES})"
         )
 
-    def k8s_explorer(self, namespace: str | None = None) -> str | None:
-        """Open the K8s cluster explorer, optionally filtered to a namespace."""
+    def k8s_explorer(self, namespace: str | None = None, *, cluster: str | None = None) -> str | None:
+        """Open the K8s cluster explorer, optionally filtered to a namespace and/or cluster."""
         try:
             filter_expr = self._k8s_base_filter()
             if namespace:
                 filter_expr += (
                     f" AND tags.namespaceName = '{namespace}'"
+                )
+            if cluster:
+                filter_expr += (
+                    f" AND tags.clusterName = '{cluster}'"
                 )
             return (
                 f"{self._base}/nr1-core"
@@ -251,7 +255,7 @@ class DeepLinkBuilder:
             return None
 
     def k8s_workload(
-        self, namespace: str, deployment_name: str
+        self, namespace: str, deployment_name: str, *, cluster: str | None = None,
     ) -> str | None:
         """Open K8s view filtered to a specific deployment."""
         try:
@@ -260,6 +264,8 @@ class DeepLinkBuilder:
                 f" AND tags.namespaceName = '{namespace}'"
                 f" AND tags.deploymentName = '{deployment_name}'"
             )
+            if cluster:
+                filter_expr += f" AND tags.clusterName = '{cluster}'"
             return (
                 f"{self._base}/nr1-core"
                 f"?account={self._account_id}"

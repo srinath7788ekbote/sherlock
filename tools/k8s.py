@@ -30,20 +30,24 @@ GQL_NRQL_QUERY = """
 }
 """
 
-# NRQL queries for K8s health (legacy — kept for fallback).
+# NRQL queries for K8s health.
+# Each template has 5 format slots:
+#   1. namespaceName  2. svc_filter  3. cluster_filter  4. since_minutes  5. facet_prefix
 NRQL_POD_STATUS = (
     "SELECT latest(status), latest(isReady), latest(nodeName), "
     "latest(reason), latest(message) "
     "FROM K8sPodSample WHERE namespaceName = '%s' "
     "%s"
-    "SINCE %d minutes ago FACET podName LIMIT 100"
+    "%s"
+    "SINCE %d minutes ago FACET %spodName LIMIT 100"
 )
 
 NRQL_CONTAINER_RESTARTS = (
     "SELECT sum(restartCountDelta) as restarts "
     "FROM K8sContainerSample WHERE namespaceName = '%s' "
     "%s"
-    "SINCE %d minutes ago FACET containerName, podName LIMIT 50"
+    "%s"
+    "SINCE %d minutes ago FACET %scontainerName, podName LIMIT 50"
 )
 
 NRQL_NODE_HEALTH = (
@@ -51,7 +55,8 @@ NRQL_NODE_HEALTH = (
     "latest(memoryWorkingSetBytes/memoryLimitBytes * 100) as memory_pct "
     "FROM K8sContainerSample WHERE namespaceName = '%s' "
     "%s"
-    "SINCE %d minutes ago FACET podName LIMIT 50"
+    "%s"
+    "SINCE %d minutes ago FACET %spodName LIMIT 50"
 )
 
 NRQL_DEPLOYMENT_STATUS = (
@@ -59,14 +64,56 @@ NRQL_DEPLOYMENT_STATUS = (
     "latest(podsUnavailable), latest(podsReady) "
     "FROM K8sDeploymentSample WHERE namespaceName = '%s' "
     "%s"
-    "SINCE %d minutes ago FACET deploymentName LIMIT 50"
+    "%s"
+    "SINCE %d minutes ago FACET %sdeploymentName LIMIT 50"
 )
+
+
+def _resolve_cluster_mode(
+    intelligence,
+    cluster_name: str | None,
+) -> tuple[str, str, str, str]:
+    """Determine cluster filter clause, facet prefix, resolved cluster, and mode label.
+
+    Returns:
+        (cluster_filter, facet_prefix, resolved_cluster, mode_label)
+        - cluster_filter: NRQL fragment, empty or "AND clusterName = 'X' "
+        - facet_prefix: "" or "clusterName, " (only non-empty in breakdown mode)
+        - resolved_cluster: the actual cluster name used, "" if none, "<breakdown>" if breakdown
+        - mode_label: "none" | "single" | "explicit" | "breakdown"
+    """
+    clusters = getattr(intelligence, "k8s", None)
+    cluster_list = getattr(clusters, "cluster_names", None) or [] if clusters else []
+    n = len(cluster_list)
+
+    # Mode: none (0 clusters known)
+    if n == 0:
+        return "", "", "", "none"
+
+    # Mode: explicit cluster_name on any account
+    if cluster_name:
+        safe = sanitize_service_name(cluster_name)
+        try:
+            resolved, _was_fuzzy, _ = fuzzy_resolve_service(
+                safe, cluster_list, threshold=0.5,
+            )
+        except Exception:
+            resolved = safe
+        return f"AND clusterName = '{resolved}' ", "", resolved, "explicit"
+
+    # Mode: single (exactly 1 cluster, no explicit override)
+    if n == 1:
+        return f"AND clusterName = '{cluster_list[0]}' ", "", cluster_list[0], "single"
+
+    # Mode: breakdown (2+ clusters, no explicit cluster_name)
+    return "", "clusterName, ", "<breakdown>", "breakdown"
 
 
 async def get_k8s_health(
     service_name: str | None = None,
     namespace: str | None = None,
     since_minutes: int = 30,
+    cluster_name: str | None = None,
 ) -> str:
     """Get Kubernetes health data for a service or namespace.
 
@@ -77,6 +124,13 @@ async def get_k8s_health(
         service_name: Optional service name to filter (fuzzy resolved).
         namespace: Optional K8s namespace to scope the query.
         since_minutes: Time window in minutes.
+        cluster_name: Optional K8s cluster to scope. Behavior:
+            - If account has 0 known clusters: parameter ignored.
+            - If account has 1 known cluster: auto-filtered to that cluster.
+            - If account has 2+ clusters AND cluster_name provided:
+              query is filtered to that cluster (fuzzy-resolved).
+            - If account has 2+ clusters AND cluster_name omitted:
+              response includes per-cluster breakdown facet.
 
     Returns:
         JSON string with K8s health data.
@@ -157,7 +211,7 @@ async def get_k8s_health(
         return await _k8s_health_queries(
                 resolved_ns, resolved_svc, service_name, namespace,
                 since_minutes, was_fuzzy_ns, was_fuzzy_svc,
-                credentials, intelligence, start,
+                credentials, intelligence, start, cluster_name,
             )
 
     except Exception as exc:
@@ -180,6 +234,7 @@ async def _k8s_health_queries(
     credentials,
     intelligence,
     start_time: float,
+    cluster_name: str | None = None,
 ) -> str:
     """Run direct NRQL queries for K8s pod, container, node, and deployment health."""
     client = get_client()
@@ -210,10 +265,14 @@ async def _k8s_health_queries(
             .get("results", [])
         )
 
-    pods_task = _nrql(NRQL_POD_STATUS % (resolved_ns, svc_filter, since_minutes))
-    restarts_task = _nrql(NRQL_CONTAINER_RESTARTS % (resolved_ns, svc_filter, since_minutes))
-    resources_task = _nrql(NRQL_NODE_HEALTH % (resolved_ns, svc_filter, since_minutes))
-    deployments_task = _nrql(NRQL_DEPLOYMENT_STATUS % (resolved_ns, svc_filter, since_minutes))
+    cluster_filter, facet_prefix, resolved_cluster, cluster_mode = _resolve_cluster_mode(
+        intelligence, cluster_name,
+    )
+
+    pods_task = _nrql(NRQL_POD_STATUS % (resolved_ns, svc_filter, cluster_filter, since_minutes, facet_prefix))
+    restarts_task = _nrql(NRQL_CONTAINER_RESTARTS % (resolved_ns, svc_filter, cluster_filter, since_minutes, facet_prefix))
+    resources_task = _nrql(NRQL_NODE_HEALTH % (resolved_ns, svc_filter, cluster_filter, since_minutes, facet_prefix))
+    deployments_task = _nrql(NRQL_DEPLOYMENT_STATUS % (resolved_ns, svc_filter, cluster_filter, since_minutes, facet_prefix))
 
     pods, restarts, resources, deployments = await asyncio.gather(
         pods_task, restarts_task, resources_task, deployments_task,
@@ -226,28 +285,53 @@ async def _k8s_health_queries(
     deployments = deployments if not isinstance(deployments, BaseException) else []
 
     signals: list[str] = []
+    is_breakdown = bool(facet_prefix)
+
+    def _cluster_tag(row: dict) -> str:
+        """Return '[cluster] ' prefix when in breakdown mode."""
+        if not is_breakdown:
+            return ""
+        c = row.get("clusterName") or "?"
+        return f"[{c}] "
+
     crashing_pods = [p for p in pods if p.get("latest.status") == "Failed"]
     not_ready_pods = [p for p in pods if p.get("latest.isReady") is False]
     restarting = [r for r in restarts if (r.get("restarts") or 0) > 5]
 
-    if crashing_pods:
-        signals.append(f"🔴 {len(crashing_pods)} pod(s) in Failed state")
-    if not_ready_pods:
-        signals.append(f"⚠️ {len(not_ready_pods)} pod(s) not ready")
-    if restarting:
-        signals.append(f"⚠️ {len(restarting)} container(s) restarting frequently")
+    if is_breakdown:
+        # In breakdown mode, group signals per cluster to prevent conflation.
+        for p in crashing_pods:
+            signals.append(f"🔴 {_cluster_tag(p)}Pod {p.get('podName', '?')} in Failed state")
+        for p in not_ready_pods:
+            signals.append(f"⚠️ {_cluster_tag(p)}Pod {p.get('podName', '?')} not ready")
+        for r in restarting:
+            signals.append(f"⚠️ {_cluster_tag(r)}Container {r.get('containerName', '?')} restarting frequently")
+    else:
+        if crashing_pods:
+            signals.append(f"🔴 {len(crashing_pods)} pod(s) in Failed state")
+        if not_ready_pods:
+            signals.append(f"⚠️ {len(not_ready_pods)} pod(s) not ready")
+        if restarting:
+            signals.append(f"⚠️ {len(restarting)} container(s) restarting frequently")
 
     for dep in deployments:
         desired = dep.get("latest.podsDesired", 0) or 0
         available = dep.get("latest.podsAvailable", 0) or 0
         if desired > 0 and available < desired:
             dep_name = dep.get("deploymentName", dep.get("facet", "unknown"))
-            signals.append(f"⚠️ Deployment {dep_name}: {available}/{desired} pods available")
+            signals.append(f"⚠️ {_cluster_tag(dep)}Deployment {dep_name}: {available}/{desired} pods available")
 
     duration_ms = int((time.time() - start_time) * 1000)
+    clusters_known = []
+    k8s_intel = getattr(intelligence, "k8s", None)
+    if k8s_intel:
+        clusters_known = list(getattr(k8s_intel, "cluster_names", None) or [])
     response: dict = {
         "namespace": resolved_ns,
         "service_name": resolved_svc,
+        "cluster_mode": cluster_mode,
+        "cluster_name": resolved_cluster if resolved_cluster != "<breakdown>" else None,
+        "clusters_known": clusters_known,
         "since_minutes": since_minutes,
         "health_signals": signals,
         "pods": pods,
@@ -280,11 +364,29 @@ async def _k8s_health_queries(
                     f"TIMESERIES 5 minutes "
                     f"SINCE {since_minutes} minutes ago"
                 )
-                response["links"] = {
-                    "k8s_explorer": _builder.k8s_explorer(resolved_ns),
-                    "workload_view": _builder.k8s_workload(resolved_ns, _bare_svc),
-                    "restart_chart": _builder.nrql_chart(_restart_nrql, since_minutes),
-                }
+
+                if is_breakdown:
+                    # Breakdown mode: per-cluster links.
+                    clusters_in_data = sorted({
+                        row.get("clusterName")
+                        for row in list(pods) + list(deployments)
+                        if row.get("clusterName")
+                    })
+                    links_by_cluster: dict = {}
+                    for cluster in clusters_in_data:
+                        links_by_cluster[cluster] = {
+                            "k8s_explorer": _builder.k8s_explorer(resolved_ns, cluster=cluster),
+                            "workload_view": _builder.k8s_workload(resolved_ns, _bare_svc, cluster=cluster),
+                        }
+                    response["links_by_cluster"] = links_by_cluster
+                else:
+                    # Single/explicit/none mode: single link set, cluster-scoped when known.
+                    cluster_kw = {"cluster": resolved_cluster} if resolved_cluster else {}
+                    response["links"] = {
+                        "k8s_explorer": _builder.k8s_explorer(resolved_ns, **cluster_kw),
+                        "workload_view": _builder.k8s_workload(resolved_ns, _bare_svc, **cluster_kw),
+                        "restart_chart": _builder.nrql_chart(_restart_nrql, since_minutes),
+                    }
         except Exception:
             pass
 

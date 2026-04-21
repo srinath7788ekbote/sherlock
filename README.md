@@ -489,6 +489,24 @@ python scripts/cli.py
 | -- | ---------------- | -------------------------------------------------------------------------- |
 | 16 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events (with deep links) |
 
+#### Multi-Cluster K8s Awareness
+
+`get_k8s_health` automatically detects multi-cluster accounts and adapts its
+query strategy using a 4-mode cluster resolution:
+
+| Mode | Condition | Behavior |
+| --- | --- | --- |
+| `none` | 0 clusters known | Legacy behavior — no cluster filter |
+| `single` | 1 cluster known, no `cluster_name` param | Auto-filters to that cluster |
+| `explicit` | `cluster_name` param provided | Filters to the specified cluster (fuzzy-resolved) |
+| `breakdown` | 2+ clusters known, no `cluster_name` param | Per-cluster FACET — every signal prefixed with `[cluster-name]` |
+
+Response shape additions:
+- `cluster_mode` — one of the 4 modes above
+- `cluster_name` — resolved cluster (null in breakdown mode)
+- `clusters_known` — all cluster names from account intelligence
+- `links_by_cluster` — per-cluster deep links (breakdown mode only)
+
 ### Logs (1 tool)
 
 | #  | Tool          | Description                                            |

@@ -164,3 +164,49 @@ K8s entities in New Relic use different names than APM:
 | `eswd-prod/sifi-adapter` | `label.app` | `sifi-adapter` |
 
 **Always search with the bare service name (after /) plus the full name.**
+
+---
+
+## Multi-Cluster Investigations
+
+When the account has multiple K8s clusters (e.g., prod + DR, or regional clusters),
+the `get_k8s_health` tool automatically detects multi-cluster mode and returns
+per-cluster breakdowns.
+
+### How it works
+
+- **0 clusters known**: Legacy behavior — no cluster filter, no facet.
+- **1 cluster known**: Auto-filters to that cluster for tighter precision.
+- **2+ clusters known, no `cluster_name` param**: Returns `cluster_mode: "breakdown"`
+  with every signal prefixed by `[cluster-name]`. This prevents conflating
+  prod with DR.
+- **2+ clusters, `cluster_name` provided**: Scopes query to that one cluster.
+
+### When to pass `cluster_name` explicitly
+
+- When you already know which cluster is affected (e.g., from an alert target)
+- When follow-up investigation narrows to a specific cluster
+- When comparing one cluster against another
+
+### When to let breakdown surface split-brain state
+
+- On initial investigation where you don't know which cluster is affected
+- When symptoms suggest one cluster is healthy and another is not
+- When the user says "check all clusters" or "compare prod and DR"
+
+### Example: Split-brain detection
+
+```
+# Call without cluster_name — tool returns breakdown
+get_k8s_health(service_name="gateway", namespace="prod")
+
+# Response shows:
+# ⚠️ [prod-live] Deployment gateway: 2/2 pods available  ← healthy
+# ⚠️ [prod-dr] Deployment gateway: 0/2 pods available    ← unhealthy
+#
+# cluster_mode: "breakdown"
+# links_by_cluster: { "prod-live": {...}, "prod-dr": {...} }
+```
+
+Without multi-cluster awareness, this would have been reported as
+"gateway: 0/2 pods" — misleadingly attributed to the live prod cluster.

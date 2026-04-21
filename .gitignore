@@ -35,6 +35,7 @@ cache/
 # Sherlock local data directory
 .sherlock/
 CLAUDE_STATE.md
+graphify-out/
 
 # Keyring
 *.keyring

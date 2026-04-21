@@ -90,6 +90,11 @@ STEP 4: NRQL for error breakdown: SELECT count(*) FROM TransactionError FACET er
 Given `eswd-prod/sifi-adapter` → bare_name=`sifi-adapter`, namespace=`eswd-prod`.
 Pass the BARE name to K8s queries, NOT the full APM name.
 
+**Cluster Checklist (multi-cluster accounts):**
+- [ ] If `len(k8s.cluster_names) > 1`, did `get_k8s_health` response have `cluster_mode = "breakdown"` or `"explicit"`?
+- [ ] If breakdown, did every K8s finding I'm reporting include a `[cluster-name]` prefix?
+- [ ] NEVER report aggregated K8s status across clusters — always report per-cluster.
+
 ```
 STEP 1: mcp_sherlock_get_k8s_health(service_name="{bare_name}", namespace="{namespace}", since_minutes=60)
 STEP 2: If no data → NRQL fallback:

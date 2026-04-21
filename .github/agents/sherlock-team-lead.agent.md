@@ -340,6 +340,20 @@ Infra Agent ── [scope: dependencies, host health]
 7. **Flag conflicts** — if two domains give contradicting signals, highlight it
 8. **Keep it short** — the report should fit on one screen for healthy services
 
+## Cluster Attribution (MANDATORY for multi-cluster accounts)
+
+When `account_intelligence.k8s.cluster_names` has more than 1 entry,
+no K8s finding may be reported in the synthesis without an explicit
+cluster name. If a domain agent returns a finding without a cluster
+prefix, treat it as ambiguous and re-dispatch with explicit
+`cluster_name`. NEVER assume the finding applies to the live prod
+cluster — DR clusters often share namespace names with live prod.
+
+The `get_k8s_health` tool enforces this structurally: when called
+without `cluster_name` on a multi-cluster account, the response
+contains `cluster_mode: "breakdown"` and every signal is prefixed
+with `[cluster-name]`. Use these prefixes in the final report.
+
 ### Causal Chain Detection (MANDATORY)
 
 Before writing the final report, the Team Lead MUST check for these known

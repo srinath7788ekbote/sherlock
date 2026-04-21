@@ -315,7 +315,8 @@ TOOLS: list[Tool] = [
         description=(
             "Get Kubernetes health data (pods, restarts, resource usage, deployments) "
             "for a service or namespace. Use the BARE deployment name (after '/') "
-            "and namespace (before '/') for best results."
+            "and namespace (before '/') for best results. Automatically adapts to "
+            "single-cluster vs multi-cluster accounts."
         ),
         inputSchema={
             "type": "object",
@@ -325,6 +326,13 @@ TOOLS: list[Tool] = [
                 "since_minutes": {
                     "type": "integer", "default": 30,
                     "description": "Time window in minutes",
+                },
+                "cluster_name": {
+                    "type": "string",
+                    "description": (
+                        "Optional K8s cluster name to scope the query. "
+                        "If omitted on multi-cluster accounts, returns per-cluster breakdown."
+                    ),
                 },
             },
         },

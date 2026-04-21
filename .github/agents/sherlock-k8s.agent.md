@@ -211,6 +211,35 @@ SINCE 30 minutes ago
 | Pod status | All Running | Some Pending | CrashLoopBackOff/OOMKilled |
 | Replica health | desired=ready | -1 | -2 or more |
 
+## Multi-Cluster Discipline (MANDATORY for multi-cluster accounts)
+
+When `account_intelligence.k8s.cluster_names` has more than 1 entry,
+every K8s finding MUST include the cluster name. The `get_k8s_health`
+tool enforces this by returning per-cluster breakdown when no
+`cluster_name` parameter is supplied — use the `cluster_mode` field
+in the response to confirm:
+
+- `"none"`: no clusters known (legacy behavior)
+- `"single"`: 1 cluster account, auto-filtered
+- `"explicit"`: multi-cluster, you supplied cluster_name
+- `"breakdown"`: multi-cluster, no cluster_name — response is faceted by clusterName
+
+In `"breakdown"` mode, every health signal already includes a
+`[cluster-name]` prefix. Preserve this prefix when reporting findings
+to the Team Lead. NEVER strip the cluster prefix or report aggregated
+counts as a single number.
+
+When passing findings to the Team Lead in breakdown mode, report
+each cluster's status separately:
+
+```markdown
+### K8s — per-cluster breakdown
+- **[prod-cluster]** 🟢 gateway 2/2 pods available
+- **[dr-cluster]** 🔴 gateway 0/2 pods available — ImagePullBackOff
+```
+
+**NEVER report "gateway 0/2 pods" without the cluster prefix on multi-cluster accounts.**
+
 ## Response Format
 
 Keep K8s findings concise. Include deep links.
