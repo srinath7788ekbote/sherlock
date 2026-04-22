@@ -614,6 +614,100 @@ chart, entity, or query.
 
 **Format:** `[View in New Relic](URL)` — clickable markdown link.
 
+## Report Template — ENFORCEMENT RULES (READ BEFORE WRITING OUTPUT)
+
+Before emitting your synthesis, verify your report against these invariants.
+If any are violated, revise before sending.
+
+### Rule 1: Status column is EMOJI, not text
+
+The Domain Status table's Status column MUST contain exactly one of:
+
+| Status | Emoji | When to use |
+|--------|-------|-------------|
+| CRITICAL | 🔴 | Domain reported CRITICAL or the finding blocks the user's request |
+| WARNING  | 🟡 | Domain reported WARNING or the finding degrades but doesn't block |
+| HEALTHY  | 🟢 | Domain reported HEALTHY |
+| NO_DATA  | ⚪ | Domain returned no data or is not configured for this account |
+
+**✅ CORRECT:**
+```
+| APM | 🟡 | 391 errors, 92% spike at 09:00 UTC — [View errors inbox](url) |
+| K8s | 🟢 | 2/2 pods, 0 restarts — [View workload](url) |
+| Logs | ⚪ | Not configured |
+```
+
+**❌ WRONG (text instead of emoji):**
+```
+| APM | WARNING | 391 errors... |
+| K8s | HEALTHY | 2/2 pods... |
+```
+
+**❌ WRONG (word plus emoji):**
+```
+| APM | 🟡 WARNING | 391 errors... |
+```
+
+The emoji is the status. The word is redundant.
+
+### Rule 2: Every Finding row includes a deep link
+
+Each `DomainResult` returned by a domain agent has a `deep_link` field. The
+team-lead's Domain Status table Finding column MUST include that link (or
+the relevant link from the agent's structured response). Format:
+
+```
+{one-line finding summary} — [View {destination}](URL)
+```
+
+Link anchor text must describe the destination, not the query:
+- ✅ `[View errors inbox](url)` (opens entity errors inbox)
+- ✅ `[View alerts](url)` (opens alerts page)
+- ✅ `[View workload](url)` (opens K8s deployment view)
+- ❌ `[Run this NRQL](url)` — only acceptable when the link actually opens the NRQL editor
+
+**When the domain has no link** (e.g. `NO_DATA`), omit the "— [View]" suffix.
+Don't fabricate a link.
+
+### Rule 3: Link anchor matches destination
+
+The destination a link opens MUST match the anchor text. If the link goes
+to the NRQL query builder, the anchor says `[View NRQL]`. If it opens an
+entity view, the anchor names the entity view. Never label a query-builder
+link as `[View errors inbox]` — users will click it expecting an entity
+view and get the NRQL editor.
+
+Tool response keys distinguish these two categories:
+- Entity-view keys (`service_overview`, `errors_inbox`, `workload_view`,
+  `view_in_nr`): anchor = "View {entity view name}"
+- Chart/NRQL keys (`*_chart`, `view_nrql`): anchor = "View NRQL chart" or
+  "View chart"
+
+### Rule 4: Recommendation links match recommendation text
+
+(Reinforces the Recommendation GUID Attribution rule added in PR #5.)
+
+When a recommendation names a service, its link MUST reference THAT service.
+If `tools/golden_signals.py` returns a `warnings` entry noting GUID ambiguity,
+the recommendation uses a generic fallback link (`[View alerts](url)`) and
+the anchor text reflects that.
+
+### Pre-send Checklist
+
+Before emitting your synthesis, run through this list mentally:
+
+- [ ] Every row in the Domain Status table has an emoji in the Status column (🔴/🟡/🟢/⚪)
+- [ ] No row has both emoji AND the text status word
+- [ ] Every row whose status is NOT ⚪ has a deep link in the Finding column
+- [ ] Every deep link anchor text matches what the URL opens
+- [ ] Every recommendation link references the service named in the recommendation
+- [ ] No recommendation link attaches a GUID from a different service in the report
+
+If optional validation is helpful, the `core/report_template.py` module
+exposes `validate_report_markdown(md)` which returns a list of warning
+strings detecting the first four rules above. Call it on your draft
+before sending if you're unsure.
+
 ## Report Template — CONCISE FORMAT
 
 ```markdown

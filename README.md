@@ -156,6 +156,16 @@ Unified Investigation Report (all 6 domains)
 | **core/**   | Shared primitives — credentials, context, intelligence, cache, sanitization, deep links, utils, dependency graph |
 | **client/** | HTTP transport — NerdGraph client with retry, read-only enforcement, batching                                    |
 
+### Report Template Enforcement
+
+The team-lead agent's investigation report follows a strict template
+documented in `.github/agents/sherlock-team-lead.agent.md` §Report
+Template — ENFORCEMENT RULES. The `core/report_template.py` module
+exposes `validate_report_markdown(md)` as an optional self-check the
+agent can call on its draft output before sending. This is an
+advisory lint, not a runtime gate — the agent decides whether to
+revise based on the returned warnings.
+
 ***
 
 ## Prerequisites
