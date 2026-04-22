@@ -16,7 +16,7 @@ from core.utils import strip_null_timeseries as _strip_null_timeseries
 
 from client.newrelic import get_client
 from core.context import AccountContext
-from core.deeplinks import get_builder as _get_deeplink_builder
+from core.deeplinks import get_builder as _get_deeplink_builder, resolve_apm_guid
 from core.sanitize import check_env_mismatch, fuzzy_resolve_service, sanitize_service_name
 
 logger = logging.getLogger("sherlock.tools.golden_signals")
@@ -345,7 +345,7 @@ async def get_service_golden_signals(
         try:
             _builder = _get_deeplink_builder()
             if _builder:
-                _guid = intelligence.apm.service_guids.get(resolved_name)
+                _guid = resolve_apm_guid(resolved_name, intelligence)
                 if is_otel:
                     _err_nrql = (
                         f"SELECT percentage(count(*), WHERE otel.status_code = 'ERROR') as error_rate "
@@ -382,6 +382,7 @@ async def get_service_golden_signals(
                     "service_overview": _builder.apm_overview(_guid, since_minutes) if _guid else None,
                     "errors_inbox": _builder.apm_errors(_guid, since_minutes) if _guid else None,
                     "transactions": _builder.apm_transactions(_guid, since_minutes) if _guid else None,
+                    # Chart links filter by appName string, not GUID — safe under ambiguity.
                     "error_chart": _builder.nrql_chart(_err_nrql, since_minutes),
                     "latency_chart": _builder.nrql_chart(_p95_nrql, since_minutes),
                     "throughput_chart": _builder.nrql_chart(_tput_nrql, since_minutes),
@@ -391,6 +392,13 @@ async def get_service_golden_signals(
                     "latency_p95": _p95_nrql,
                     "throughput": _tput_nrql,
                 }
+                # If GUID was ambiguous, surface that to the agent.
+                if not _guid and resolved_name in intelligence.apm.service_names:
+                    response.setdefault("warnings", []).append(
+                        f"APM GUID for '{resolved_name}' is ambiguous "
+                        f"(multiple reporters, no unique reporting match). "
+                        f"Entity-view links omitted; use chart links for evidence."
+                    )
         except Exception:
             pass
 

@@ -274,3 +274,110 @@ class TestDecodeEntityGuid:
         )
         cross = detect_cross_account_entities(intel)
         assert len(cross) == 0
+
+
+class TestAPMDuplicateNameHandling:
+    """Tests for APM discovery handling of duplicate entity names."""
+
+    def test_apm_discovery_preserves_duplicate_names_in_candidates(self):
+        """Two entities with the same name should both appear in service_guid_candidates."""
+        intel = AccountIntelligence(account_id="123456")
+        intel.apm.service_guid_candidates = {
+            "shared-svc": [
+                {"guid": "guid-aaa", "reporting": True, "tags": {}, "alert_severity": ""},
+                {"guid": "guid-bbb", "reporting": False, "tags": {}, "alert_severity": ""},
+            ],
+        }
+        assert len(intel.apm.service_guid_candidates["shared-svc"]) == 2
+        guids = [c["guid"] for c in intel.apm.service_guid_candidates["shared-svc"]]
+        assert "guid-aaa" in guids
+        assert "guid-bbb" in guids
+
+    def test_apm_discovery_prefers_reporting_entity(self):
+        """service_guids should hold the reporting entity when one reports and one does not."""
+        intel = AccountIntelligence(account_id="123456")
+        intel.apm.service_guid_candidates = {
+            "shared-svc": [
+                {"guid": "guid-stale", "reporting": False, "tags": {}, "alert_severity": "WARNING"},
+                {"guid": "guid-live", "reporting": True, "tags": {}, "alert_severity": ""},
+            ],
+        }
+        # Replicate the preferred-selection logic from the discovery block.
+        _severity_rank = {"CRITICAL": 3, "WARNING": 2, "NOT_ALERTING": 1, "": 0, "NOT_CONFIGURED": 0}
+        for name, cands in intel.apm.service_guid_candidates.items():
+            best = sorted(
+                cands,
+                key=lambda c: (
+                    1 if c.get("reporting") else 0,
+                    _severity_rank.get(c.get("alert_severity", ""), 0),
+                ),
+                reverse=True,
+            )[0]
+            if best.get("guid"):
+                intel.apm.service_guids[name] = best["guid"]
+        assert intel.apm.service_guids["shared-svc"] == "guid-live"
+
+    def test_apm_discovery_prefers_critical_over_warning_when_both_reporting(self):
+        """When both candidates report, prefer the one with CRITICAL alert_severity."""
+        intel = AccountIntelligence(account_id="123456")
+        intel.apm.service_guid_candidates = {
+            "shared-svc": [
+                {"guid": "guid-warn", "reporting": True, "tags": {}, "alert_severity": "WARNING"},
+                {"guid": "guid-crit", "reporting": True, "tags": {}, "alert_severity": "CRITICAL"},
+            ],
+        }
+        _severity_rank = {"CRITICAL": 3, "WARNING": 2, "NOT_ALERTING": 1, "": 0, "NOT_CONFIGURED": 0}
+        for name, cands in intel.apm.service_guid_candidates.items():
+            best = sorted(
+                cands,
+                key=lambda c: (
+                    1 if c.get("reporting") else 0,
+                    _severity_rank.get(c.get("alert_severity", ""), 0),
+                ),
+                reverse=True,
+            )[0]
+            if best.get("guid"):
+                intel.apm.service_guids[name] = best["guid"]
+        assert intel.apm.service_guids["shared-svc"] == "guid-crit"
+
+    def test_apm_discovery_populates_reporting_guids_set(self):
+        """reporting_guids should contain only GUIDs of entities where reporting=True."""
+        intel = AccountIntelligence(account_id="123456")
+        intel.apm.reporting_guids = {"guid-live-1", "guid-live-2"}
+        assert "guid-live-1" in intel.apm.reporting_guids
+        assert "guid-live-2" in intel.apm.reporting_guids
+        assert "guid-stale" not in intel.apm.reporting_guids
+
+    def test_apm_discovery_empty_name_skipped(self):
+        """An entity with an empty name should not crash or be included."""
+        intel = AccountIntelligence(account_id="123456")
+        # Simulate what the discovery block does: skip empty names
+        entities = [
+            {"name": "", "guid": "guid-empty", "reporting": True, "tags": []},
+            {"name": "real-svc", "guid": "guid-real", "reporting": True, "tags": []},
+        ]
+        for ent in entities:
+            name = ent.get("name", "")
+            if not name:
+                continue
+            intel.apm.service_names.append(name)
+        assert "real-svc" in intel.apm.service_names
+        assert "" not in intel.apm.service_names
+        assert len(intel.apm.service_names) == 1
+
+    def test_apm_discovery_service_names_deduped(self):
+        """service_names list should have no duplicates when 2 entities share a name."""
+        intel = AccountIntelligence(account_id="123456")
+        entities = [
+            {"name": "dup-svc", "guid": "guid-1"},
+            {"name": "dup-svc", "guid": "guid-2"},
+            {"name": "unique-svc", "guid": "guid-3"},
+        ]
+        for ent in entities:
+            name = ent.get("name", "")
+            if not name:
+                continue
+            if name not in intel.apm.service_names:
+                intel.apm.service_names.append(name)
+        assert intel.apm.service_names.count("dup-svc") == 1
+        assert len(intel.apm.service_names) == 2

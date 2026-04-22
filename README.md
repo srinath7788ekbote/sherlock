@@ -476,6 +476,20 @@ python scripts/cli.py
 | 11 | `get_app_metrics`      | Get key metrics for a specific application |
 | 12 | `get_deployments`      | List recent deployments for an application |
 
+#### APM Entity Disambiguation
+
+When the account has multiple APM reporters sharing a `name` field (which
+happens during migrations, multi-cluster shared services, etc.), Sherlock
+preserves all candidates in `intel.apm.service_guid_candidates[name]`
+alongside the single preferred GUID in `intel.apm.service_guids[name]`.
+
+The `resolve_apm_guid()` helper in `core/deeplinks.py` is the supported
+way for response-building code to attach APM entity-view links to named
+services. It returns `None` when the GUID is ambiguous, and response
+builders omit the entity-view link in that case rather than attaching a
+potentially-wrong GUID. Chart links (which filter by `appName` string, not
+GUID) remain available as unambiguous evidence.
+
 ### Alerts & Incidents (3 tools)
 
 | #  | Tool                    | Description                                                         |

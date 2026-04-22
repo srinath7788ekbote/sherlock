@@ -32,6 +32,72 @@ def _base(region: str) -> str:
     return NR_BASE_EU if region.upper() == "EU" else NR_BASE_US
 
 
+# ── APM GUID Resolution ─────────────────────────────────────────────────
+
+
+def resolve_apm_guid(
+    service_name: str,
+    intelligence,
+    *,
+    require_reporting: bool = True,
+) -> str | None:
+    """Resolve a service name to an APM entity GUID with validation.
+
+    Returns the GUID only when:
+    - Exactly one candidate matches the name, OR
+    - Multiple candidates match but exactly one is currently reporting
+      (when require_reporting=True), OR
+    - Multiple candidates match and none/all are reporting — returns the
+      preferred candidate from service_guids (same tie-break the discovery
+      block uses)
+
+    Returns None when:
+    - The name is not in intelligence.apm.service_guid_candidates
+    - The resolved GUID is not in intelligence.apm.reporting_guids
+      (when require_reporting=True)
+    - Any exception occurs
+
+    This helper is the ONLY supported way for response-building code to
+    attach an APM entity-view link to text that names a service. Callers
+    that bypass this helper risk mis-attributing GUIDs across services
+    with similar names.
+    """
+    try:
+        if not service_name:
+            return None
+        apm = getattr(intelligence, "apm", None)
+        if not apm:
+            return None
+
+        candidates = apm.service_guid_candidates.get(service_name) or []
+        if not candidates:
+            return None
+
+        if len(candidates) == 1:
+            guid = candidates[0].get("guid")
+            if not guid:
+                return None
+            if require_reporting and guid not in apm.reporting_guids:
+                return None
+            return guid
+
+        # Multiple candidates — prefer the single reporting one.
+        reporting = [c for c in candidates if c.get("reporting")]
+        if len(reporting) == 1:
+            return reporting[0].get("guid")
+
+        # Two or more reporting, or zero reporting — fall back to the
+        # preferred GUID chosen by discovery. Only safe when not require_reporting.
+        if not require_reporting:
+            return apm.service_guids.get(service_name)
+
+        # Require reporting + ambiguous — DO NOT GUESS. Return None; caller
+        # omits the entity-view link.
+        return None
+    except Exception:
+        return None
+
+
 # ── DeepLinkBuilder ──────────────────────────────────────────────────────
 
 

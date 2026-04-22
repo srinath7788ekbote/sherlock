@@ -486,6 +486,24 @@ class APMIntelligence(BaseModel):
 
     service_names: list[str] = Field(default_factory=list)
     service_guids: dict[str, str] = Field(default_factory=dict)
+    """Preferred GUID per service name. When multiple reporters share a name,
+    this stores the one most likely to be the user's intent (currently-reporting,
+    most recent alertSeverity event). Use service_guid_candidates for the full
+    list when disambiguation matters."""
+
+    service_guid_candidates: dict[str, list[dict]] = Field(default_factory=dict)
+    """Full candidate list per service name. Each candidate is a dict with:
+        - guid: str
+        - reporting: bool
+        - tags: dict[str, list[str]]  (for downstream disambiguation)
+        - alert_severity: str  (NOT_CONFIGURED | NOT_ALERTING | WARNING | CRITICAL)
+    Populated even when there's only one match; consumers that don't care about
+    duplicates can keep using service_guids."""
+
+    reporting_guids: set[str] = Field(default_factory=set)
+    """Fast-lookup set of GUIDs currently reporting data. Used by
+    resolve_apm_guid() to validate before returning."""
+
     service_languages: dict[str, str] = Field(default_factory=dict)
     naming_pattern: str = ""
     top_error_classes: list[str] = Field(default_factory=list)
@@ -1769,27 +1787,65 @@ async def learn_account(credentials: Credentials) -> AccountIntelligence:
             intel.account_meta.total_apm_services = (
                 api_count if api_count else len(all_apm_entities)
             )
+            # Rebuild candidates from scratch each refresh.
+            # service_guid_candidates holds the full multi-entity picture;
+            # service_guids holds the "preferred" GUID for simple lookup.
+            intel.apm.service_guid_candidates.clear()
             for ent in all_apm_entities:
                 name = ent.get("name", "")
-                if name:
+                if not name:
+                    continue
+                guid = ent.get("guid", "")
+                reporting = ent.get("reporting", False) or False
+                alert_severity = ent.get("alertSeverity", "") or ""
+                tags_raw = ent.get("tags", []) or []
+                tags = {t["key"]: t.get("values", []) for t in tags_raw if t.get("key")}
+
+                candidate = {
+                    "guid": guid,
+                    "reporting": bool(reporting),
+                    "tags": tags,
+                    "alert_severity": alert_severity,
+                }
+                intel.apm.service_guid_candidates.setdefault(name, []).append(candidate)
+
+                if name not in intel.apm.service_names:
                     intel.apm.service_names.append(name)
-                    guid = ent.get("guid", "")
-                    if guid:
-                        # TODO(fix-apm-guid-cross-cluster-ambiguity): When multiple APM apps
-                        # share a similar name across clusters (e.g. east-prod/gateway and
-                        # eswd-prod/gateway), fuzzy resolution may pick the wrong GUID.
-                        # Apr 20 2026 DFIN_AD investigation surfaced this: entity.name lookup
-                        # returned the wrong app_id for the gateway service. Follow-up PR should
-                        # disambiguate by cluster tag or account-level uniqueness check.
-                        intel.apm.service_guids[name] = guid
-                tags = {t["key"]: t.get("values", []) for t in ent.get("tags", [])}
+
+                if guid and reporting:
+                    intel.apm.reporting_guids.add(guid)
+
                 lang = tags.get("language", [""])[0] if tags.get("language") else ""
-                if lang:
+                if lang and name not in intel.apm.service_languages:
                     intel.apm.service_languages[name] = lang
-                envs = tags.get("environment", [])
+                envs = tags.get("environment", []) or []
                 for e in envs:
                     if e and e not in intel.apm.environments:
                         intel.apm.environments.append(e)
+
+            # Build the preferred service_guids map: prefer reporting entities,
+            # then the one with the most-severe active alert_severity, then the
+            # first one seen.
+            _severity_rank = {
+                "CRITICAL": 3,
+                "WARNING": 2,
+                "NOT_ALERTING": 1,
+                "": 0,
+                "NOT_CONFIGURED": 0,
+            }
+            intel.apm.service_guids.clear()
+            for name, cands in intel.apm.service_guid_candidates.items():
+                best = sorted(
+                    cands,
+                    key=lambda c: (
+                        1 if c.get("reporting") else 0,
+                        _severity_rank.get(c.get("alert_severity", ""), 0),
+                    ),
+                    reverse=True,
+                )[0]
+                if best.get("guid"):
+                    intel.apm.service_guids[name] = best["guid"]
+
             intel.apm.naming_pattern = _infer_naming_pattern(intel.apm.service_names)
     except Exception:
         pass

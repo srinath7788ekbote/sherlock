@@ -246,3 +246,102 @@ class TestGetServiceGoldenSignals:
         assert parsed["latency"]["avg_duration_s"] == 0.12
         assert parsed["throughput"]["rpm"] == 600
         assert any("OTel" in w for w in parsed.get("warnings", []))
+
+
+class TestGoldenSignalsGUIDResolution:
+    """Tests for GUID ambiguity handling in golden signals deep links."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_response_omits_entity_links_when_guid_ambiguous(self, gs_context, mock_intelligence):
+        """When two reporting entities share a name, entity-view links should be None
+        but chart links should still be present."""
+        # Inject ambiguous GUID state: two reporting candidates for the same name.
+        mock_intelligence.apm.service_guid_candidates["payment-svc-prod"] = [
+            {"guid": "guid-cluster-a", "reporting": True, "tags": {}, "alert_severity": ""},
+            {"guid": "guid-cluster-b", "reporting": True, "tags": {}, "alert_severity": ""},
+        ]
+        mock_intelligence.apm.reporting_guids = {"guid-cluster-a", "guid-cluster-b"}
+
+        def _route(request):
+            body = request.content.decode()
+            if "event_count" in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"event_count": 0}]))
+            if "percentile(duration" in body and "TIMESERIES" not in body:
+                return httpx.Response(200, json=_mock_nrql_response([{
+                    "avg_duration": 0.05,
+                    "percentile.duration.50": 0.03,
+                    "percentile.duration.90": 0.08,
+                    "percentile.duration.95": 0.12,
+                    "percentile.duration.99": 0.25,
+                }]))
+            if "rate(count" in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"rpm": 100}]))
+            if "error IS true" in body and "TIMESERIES" not in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"error_rate": 1.0, "total_transactions": 1000}]))
+            if "cpuPercent" in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"avg_cpu": 20}]))
+            return httpx.Response(200, json=_mock_nrql_response([]))
+
+        respx.post("https://api.newrelic.com/graphql").mock(side_effect=_route)
+
+        result = await get_service_golden_signals("payment-svc-prod")
+        parsed = json.loads(result)
+
+        links = parsed.get("links", {})
+        # Entity-view links should be None (ambiguous GUID).
+        assert links.get("service_overview") is None
+        assert links.get("errors_inbox") is None
+        assert links.get("transactions") is None
+        # Chart links should still be present (filter by appName, safe).
+        assert links.get("error_chart") is not None
+        assert links.get("latency_chart") is not None
+        assert links.get("throughput_chart") is not None
+        # Should have a warning about ambiguous GUID.
+        warnings = parsed.get("warnings", [])
+        assert any("ambiguous" in w.lower() for w in warnings)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_response_includes_entity_links_when_guid_unambiguous(self, gs_context, mock_intelligence):
+        """Normal case: single reporting candidate → all links present."""
+        # Ensure single candidate (default from conftest should be fine).
+        mock_intelligence.apm.service_guid_candidates["payment-svc-prod"] = [
+            {"guid": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx", "reporting": True, "tags": {}, "alert_severity": "NOT_ALERTING"},
+        ]
+        mock_intelligence.apm.reporting_guids = {"MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx"}
+
+        def _route(request):
+            body = request.content.decode()
+            if "event_count" in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"event_count": 0}]))
+            if "percentile(duration" in body and "TIMESERIES" not in body:
+                return httpx.Response(200, json=_mock_nrql_response([{
+                    "avg_duration": 0.05,
+                    "percentile.duration.50": 0.03,
+                    "percentile.duration.90": 0.08,
+                    "percentile.duration.95": 0.12,
+                    "percentile.duration.99": 0.25,
+                }]))
+            if "rate(count" in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"rpm": 1000}]))
+            if "error IS true" in body and "TIMESERIES" not in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"error_rate": 0.5, "total_transactions": 5000}]))
+            if "cpuPercent" in body:
+                return httpx.Response(200, json=_mock_nrql_response([{"avg_cpu": 30}]))
+            return httpx.Response(200, json=_mock_nrql_response([]))
+
+        respx.post("https://api.newrelic.com/graphql").mock(side_effect=_route)
+
+        result = await get_service_golden_signals("payment-svc-prod")
+        parsed = json.loads(result)
+
+        links = parsed.get("links", {})
+        # All entity-view links should be present.
+        assert links.get("service_overview") is not None
+        assert links.get("errors_inbox") is not None
+        assert links.get("transactions") is not None
+        # Chart links also present.
+        assert links.get("error_chart") is not None
+        assert links.get("latency_chart") is not None
+        assert links.get("throughput_chart") is not None

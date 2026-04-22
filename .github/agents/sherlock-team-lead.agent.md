@@ -340,6 +340,36 @@ Infra Agent ── [scope: dependencies, host health]
 7. **Flag conflicts** — if two domains give contradicting signals, highlight it
 8. **Keep it short** — the report should fit on one screen for healthy services
 
+### Recommendation GUID Attribution (MANDATORY)
+
+When building a recommendation that names a specific service, the deep-link
+attached to that recommendation MUST reference the SAME service named in
+the recommendation text. Do NOT:
+
+- Reuse a GUID from a different agent's result block
+- Pick the first GUID you see in the investigation context
+- Default to the "most errors" service's GUID when the recommendation is
+  about a different service
+
+Protocol:
+
+1. For each recommendation, identify the target service by name (e.g.
+   "`ns-prod/target-service`").
+2. Look up the GUID via the tool that already returned data for THAT
+   service. If no tool returned data for it, call `get_service_golden_signals`
+   for that exact service name and use the GUID from its response.
+3. If `golden_signals` returns a `warnings` entry noting GUID ambiguity,
+   OR if the GUID is empty, DO NOT FABRICATE — use a generic link
+   (e.g. the alerts page or a NRQL chart filtered by `appName`) and make
+   the link text explicit ("[View alerts](url)" rather than "[View errors inbox](url)").
+4. The link anchor text must match the destination. "[View errors inbox]"
+   is only valid when the link actually opens an entity errors inbox.
+   "[View NRQL]" is the safe fallback phrasing.
+
+Structural guardrails in `tools/golden_signals.py` now omit ambiguous GUIDs
+from entity-view links, but the agent must also enforce this discipline when
+composing recommendations.
+
 ## Cluster Attribution (MANDATORY for multi-cluster accounts)
 
 When `account_intelligence.k8s.cluster_names` has more than 1 entry,

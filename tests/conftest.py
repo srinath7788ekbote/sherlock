@@ -66,6 +66,22 @@ def mock_intelligence() -> AccountIntelligence:
                 "auth-service-prod": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwy",
                 "export-worker-prod": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwz",
             },
+            service_guid_candidates={
+                "payment-svc-prod": [
+                    {"guid": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx", "reporting": True, "tags": {"language": ["java"]}, "alert_severity": "NOT_ALERTING"},
+                ],
+                "auth-service-prod": [
+                    {"guid": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwy", "reporting": True, "tags": {"language": ["python"]}, "alert_severity": "NOT_ALERTING"},
+                ],
+                "export-worker-prod": [
+                    {"guid": "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwz", "reporting": True, "tags": {"language": ["nodejs"]}, "alert_severity": "NOT_ALERTING"},
+                ],
+            },
+            reporting_guids={
+                "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx",
+                "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwy",
+                "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwz",
+            },
             service_languages={
                 "payment-svc-prod": "java",
                 "auth-service-prod": "python",

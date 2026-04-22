@@ -21,7 +21,7 @@ import pytest
 
 from core.context import AccountContext
 from core.credentials import Credentials
-from core.deeplinks import DeepLinkBuilder, NR_BASE_EU, NR_BASE_US, get_builder
+from core.deeplinks import DeepLinkBuilder, NR_BASE_EU, NR_BASE_US, get_builder, resolve_apm_guid
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -825,4 +825,112 @@ class TestRoutingInvariants:
             "Retired log_search() (Lucene) still referenced in tools:\n"
             + "\n".join(violations)
         )
+
+
+# ── resolve_apm_guid() tests ────────────────────────────────────────────
+
+
+class TestResolveApmGuid:
+    """Tests for the resolve_apm_guid() GUID resolution helper."""
+
+    @staticmethod
+    def _make_intel(*, candidates=None, reporting_guids=None, service_guids=None):
+        """Build a minimal intelligence-like object with APM attributes."""
+        from core.intelligence import AccountIntelligence, APMIntelligence
+
+        apm = APMIntelligence(
+            service_guid_candidates=candidates or {},
+            reporting_guids=reporting_guids or set(),
+            service_guids=service_guids or {},
+            service_names=list((candidates or {}).keys()),
+        )
+        return AccountIntelligence(account_id="123456", apm=apm)
+
+    def test_resolve_single_reporting_match_returns_guid(self):
+        """Single candidate that is reporting → returns its GUID."""
+        intel = self._make_intel(
+            candidates={"svc-a": [{"guid": "guid-a", "reporting": True, "tags": {}, "alert_severity": ""}]},
+            reporting_guids={"guid-a"},
+        )
+        assert resolve_apm_guid("svc-a", intel) == "guid-a"
+
+    def test_resolve_single_non_reporting_match_returns_none_when_requiring_reporting(self):
+        """Single candidate that is NOT reporting → None when require_reporting=True."""
+        intel = self._make_intel(
+            candidates={"svc-a": [{"guid": "guid-a", "reporting": False, "tags": {}, "alert_severity": ""}]},
+            reporting_guids=set(),
+        )
+        assert resolve_apm_guid("svc-a", intel, require_reporting=True) is None
+
+    def test_resolve_single_non_reporting_match_returns_guid_when_not_requiring_reporting(self):
+        """Single candidate that is NOT reporting → GUID when require_reporting=False."""
+        intel = self._make_intel(
+            candidates={"svc-a": [{"guid": "guid-a", "reporting": False, "tags": {}, "alert_severity": ""}]},
+            reporting_guids=set(),
+        )
+        assert resolve_apm_guid("svc-a", intel, require_reporting=False) == "guid-a"
+
+    def test_resolve_multiple_candidates_single_reporting_returns_reporting_one(self):
+        """Two candidates, only one reporting → returns the reporting one."""
+        intel = self._make_intel(
+            candidates={"svc-a": [
+                {"guid": "guid-stale", "reporting": False, "tags": {}, "alert_severity": ""},
+                {"guid": "guid-live", "reporting": True, "tags": {}, "alert_severity": ""},
+            ]},
+            reporting_guids={"guid-live"},
+        )
+        assert resolve_apm_guid("svc-a", intel) == "guid-live"
+
+    def test_resolve_multiple_candidates_all_reporting_returns_none_when_requiring_reporting(self):
+        """Two candidates both reporting → None (ambiguous) when require_reporting=True."""
+        intel = self._make_intel(
+            candidates={"svc-a": [
+                {"guid": "guid-x", "reporting": True, "tags": {}, "alert_severity": ""},
+                {"guid": "guid-y", "reporting": True, "tags": {}, "alert_severity": ""},
+            ]},
+            reporting_guids={"guid-x", "guid-y"},
+            service_guids={"svc-a": "guid-x"},
+        )
+        assert resolve_apm_guid("svc-a", intel, require_reporting=True) is None
+
+    def test_resolve_multiple_candidates_all_reporting_returns_preferred_when_not_requiring(self):
+        """Two candidates both reporting → preferred GUID when require_reporting=False."""
+        intel = self._make_intel(
+            candidates={"svc-a": [
+                {"guid": "guid-x", "reporting": True, "tags": {}, "alert_severity": ""},
+                {"guid": "guid-y", "reporting": True, "tags": {}, "alert_severity": ""},
+            ]},
+            reporting_guids={"guid-x", "guid-y"},
+            service_guids={"svc-a": "guid-x"},
+        )
+        assert resolve_apm_guid("svc-a", intel, require_reporting=False) == "guid-x"
+
+    def test_resolve_multiple_candidates_zero_reporting_returns_none(self):
+        """Two candidates both dark → None."""
+        intel = self._make_intel(
+            candidates={"svc-a": [
+                {"guid": "guid-x", "reporting": False, "tags": {}, "alert_severity": ""},
+                {"guid": "guid-y", "reporting": False, "tags": {}, "alert_severity": ""},
+            ]},
+            reporting_guids=set(),
+        )
+        assert resolve_apm_guid("svc-a", intel) is None
+
+    def test_resolve_unknown_name_returns_none(self):
+        """A name not in candidates → None."""
+        intel = self._make_intel(candidates={})
+        assert resolve_apm_guid("nonexistent-svc", intel) is None
+
+    def test_resolve_empty_name_returns_none(self):
+        """Empty string name → None."""
+        intel = self._make_intel(candidates={"svc-a": [{"guid": "guid-a", "reporting": True, "tags": {}, "alert_severity": ""}]})
+        assert resolve_apm_guid("", intel) is None
+
+    def test_resolve_missing_apm_attribute_returns_none(self):
+        """Object without apm attribute → None (defensive)."""
+
+        class NoApm:
+            pass
+
+        assert resolve_apm_guid("svc-a", NoApm()) is None
 
