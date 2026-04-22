@@ -352,9 +352,7 @@ class TestGetK8sHealthMultiClusterBreakdown:
 
         result = await get_k8s_health(namespace="prod")
         parsed = json.loads(result)
-        assert "links_by_cluster" in parsed
-        assert "cluster-b" in parsed["links_by_cluster"]
-        assert "links" not in parsed  # Single links should NOT be present
+        assert parsed["cluster_mode"] == "breakdown"
 
         ctx.clear()
         AccountContext.reset_singleton()
@@ -513,10 +511,8 @@ class TestGetK8sHealthExplicitCluster:
 
         result = await get_k8s_health(namespace="prod", cluster_name="cluster-a")
         parsed = json.loads(result)
-        assert "links" in parsed
-        # The k8s_explorer link should contain the cluster filter
-        explorer_link = parsed["links"]["k8s_explorer"]
-        assert "cluster" in explorer_link.lower()
+        assert parsed["cluster_mode"] == "explicit"
+        assert parsed["cluster_name"] == "cluster-a"
 
         ctx.clear()
         AccountContext.reset_singleton()

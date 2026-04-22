@@ -390,7 +390,7 @@ async def get_monitor_status(
                         f"TIMESERIES 5 minutes SINCE {since_minutes} minutes ago"
                     )
                     response["links"] = {
-                        "monitor": _builder.synthetic_monitor(_guid),
+                        "monitor": _builder.synthetic_monitor(_guid, since_minutes),
                         "failed_results": _builder.synthetic_results(
                             _guid, since_minutes, "FAILED"
                         ),
@@ -814,7 +814,7 @@ async def investigate_synthetic(
                 _guid = monitor_meta.guid
                 _svc_attr = intelligence.logs.service_attribute or "service.name"
                 _invest_links = {
-                    "monitor": _builder.synthetic_monitor(_guid),
+                    "monitor": _builder.synthetic_monitor(_guid, since_minutes),
                     "failed_results": _builder.synthetic_results(
                         _guid, since_minutes, "FAILED"
                     ),

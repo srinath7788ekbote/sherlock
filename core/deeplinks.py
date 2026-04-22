@@ -128,74 +128,70 @@ class DeepLinkBuilder:
     def apm_overview(
         self,
         entity_guid: str,
-        since_minutes: int | None = None,
+        since_minutes: int = 30,
     ) -> str | None:
         """Open the APM overview page for a service.
 
-        Uses the current ``nr1-core/apm/overview/{guid}`` path.
+        Verified 2026-04: the correct NR1 route is
+        ``/nr1-core/apm/overview/<GUID>``.
+        Required query params: ``account``, ``duration``.
         """
         try:
-            url = (
+            return (
                 f"{self._base}/nr1-core/apm/overview/{entity_guid}"
                 f"?account={self._account_id}"
+                f"&duration={since_minutes * 60 * 1000}"
             )
-            if since_minutes:
-                url += f"&duration={since_minutes * 60 * 1000}"
-            return url
         except Exception:
             return None
 
     # ── Service map link ───────────────────────────────────────────
 
-    def service_map(self, entity_guid: str) -> str | None:
-        """Open the service map centred on an entity."""
+    def service_map(
+        self, entity_guid: str, since_minutes: int = 30
+    ) -> str | None:
+        """Open the relationships map (service map) for an entity.
+
+        Verified 2026-04: the correct NR1 route is
+        ``/nr1-core/entity-relationships-experience-maps/relationships-map-experience/<GUID>``.
+        Required query params: ``account``, ``duration``, ``filters``.
+        """
         try:
             return (
-                f"{self._base}/nr1-core"
+                f"{self._base}/nr1-core/entity-relationships-experience-maps/"
+                f"relationships-map-experience/{entity_guid}"
                 f"?account={self._account_id}"
-                f"&entity={entity_guid}"
-                f"&viz=service-map"
+                f"&duration={since_minutes * 60 * 1000}"
+                f"&filters=selectedInstance%20IN%20%28%29"
             )
         except Exception:
             return None
 
     # ── NRQL / Query Builder links ─────────────────────────────────
+    #
+    # NR retired the standalone query builder launcher URL (2026-04).
+    # The ``/launcher/data-exploration.query-builder?pane=`` path now
+    # redirects to the Notebooks page. The query builder is now a
+    # bottom-panel overlay ("Query your data") available on every NR
+    # page — there is no URL that pre-loads NRQL.
+    #
+    # These methods return ``None`` so callers omit the chart link.
+    # Tool responses include the raw NRQL string in a ``nrql`` key
+    # so engineers can copy-paste into the "Query your data" panel.
 
     def nrql_chart(self, nrql: str, since_minutes: int) -> str | None:
-        """Open the New Relic query builder with *nrql* pre-loaded.
+        """Retired — NR no longer supports a query-builder deep link.
 
-        The NRQL must already contain the correct ``SINCE`` clause.
-        Uses the launcher path with a base64-encoded ``pane`` parameter
-        which is how NR1 nerdlets consume their initial configuration.
+        The ``/launcher/data-exploration.query-builder?pane=`` URL now
+        redirects to Notebooks. Returns ``None`` so callers omit the
+        link. The NRQL query is still available in the response body
+        for copy-paste into NR's "Query your data" bottom panel.
         """
-        try:
-            pane = json.dumps(
-                {
-                    "nerdletId": "data-exploration.query-builder",
-                    "initialActiveInterface": "nrqlEditor",
-                    "initialNrqlValue": nrql,
-                    "initialAccountId": int(self._account_id),
-                },
-                separators=(",", ":"),
-            )
-            pane_b64 = base64.b64encode(pane.encode()).decode()
-            return (
-                f"{self._base}/launcher/data-exploration.query-builder"
-                f"?pane={urllib.parse.quote(pane_b64, safe='')}"
-                f"&platform[accountId]={self._account_id}"
-            )
-        except Exception:
-            return None
+        return None
 
     def spike_chart(self, timeseries_nrql: str, since_minutes: int) -> str | None:
-        """Convenience wrapper for :meth:`nrql_chart` when showing a spike.
-
-        The NRQL must contain ``TIMESERIES`` so the spike is visible.
-        """
-        try:
-            return self.nrql_chart(timeseries_nrql, since_minutes)
-        except Exception:
-            return None
+        """Retired — delegates to :meth:`nrql_chart` which returns None."""
+        return None
 
     # ── Entity links ───────────────────────────────────────────────
 
@@ -212,14 +208,14 @@ class DeepLinkBuilder:
         """Open the errors inbox for an APM service.
 
         Verified 2026-04: the correct NR1 route is
-        ``/nr1-core/errors-inbox/entity-inbox/<GUID>``. The old
-        ``?nerdletId=errors-inbox.homepage`` redirect URL silently lands
-        on the APM summary page instead of the errors inbox.
+        ``/nr1-core/errors-inbox/entity-inbox/<GUID>``.
+        Required query params: ``account``, ``duration``, ``filters``.
         """
         try:
             return (
                 f"{self._base}/nr1-core/errors-inbox/entity-inbox/{entity_guid}"
-                f"?duration={since_minutes * 60 * 1000}"
+                f"?account={self._account_id}"
+                f"&duration={since_minutes * 60 * 1000}"
                 f"&filters=selectedInstance%20IN%20%28%29"
             )
         except Exception:
@@ -231,14 +227,15 @@ class DeepLinkBuilder:
         """Open the transaction list for an APM service.
 
         Verified 2026-04: the correct NR1 route is
-        ``/nr1-core/apm-features/transactions/<GUID>``. The old
-        ``?nerdletId=apm-nerdlets.apm-transactions-nerdlet`` redirect
-        silently lands on the APM summary page.
+        ``/nr1-core/apm-features/transactions/<GUID>``.
+        Required query params: ``account``, ``duration``, ``filters``.
         """
         try:
             return (
                 f"{self._base}/nr1-core/apm-features/transactions/{entity_guid}"
-                f"?duration={since_minutes * 60 * 1000}"
+                f"?account={self._account_id}"
+                f"&duration={since_minutes * 60 * 1000}"
+                f"&filters=selectedInstance%20IN%20%28%29"
             )
         except Exception:
             return None
@@ -246,21 +243,25 @@ class DeepLinkBuilder:
     def distributed_traces(
         self,
         entity_guid: str,
-        since_minutes: int,
+        since_minutes: int = 30,
         error_only: bool = False,
     ) -> str | None:
-        """Open distributed tracing filtered to a service."""
+        """Open the distributed trace list for a specific APM entity.
+
+        Verified 2026-04: the correct NR1 route is
+        ``/nr1-core/distributed-tracing/distributed-trace-list/<GUID>``.
+        Required query params: ``account``, ``duration``, ``filters``.
+        The old ``/distributed-tracing?entity.guid=`` opens the global
+        tracing explorer instead of the service-scoped trace list.
+        """
         try:
             url = (
-                f"{self._base}/distributed-tracing"
-                f"?accountId={self._account_id}"
+                f"{self._base}/nr1-core/distributed-tracing/"
+                f"distributed-trace-list/{entity_guid}"
+                f"?account={self._account_id}"
                 f"&duration={since_minutes * 60 * 1000}"
-                f"&entity.guid={entity_guid}"
+                f"&filters=selectedInstance%20IN%20%28%29"
             )
-            if error_only:
-                payload = json.dumps({"error": True}, separators=(",", ":"))
-                b64 = base64.b64encode(payload.encode()).decode()
-                url += f"&filters={urllib.parse.quote(b64, safe='')}"
             return url
         except Exception:
             return None
@@ -275,47 +276,51 @@ class DeepLinkBuilder:
 
     # ── Kubernetes links ───────────────────────────────────────────
     #
-    # NR retired the legacy ``/kubernetes?accountId=X`` route — it now
-    # redirects to the Catalog home page. The current working path is the
-    # entity explorer (``/nr1-core``) filtered on both ``domain`` and
-    # ``type``. Verified 2026-04 against a user-shared working URL from
-    # the live NR UI. Omitting ``domain`` causes NR to drop the type
-    # filter and fall back to "All Entities".
+    # Verified 2026-04: NR uses simple equality filters with backtick-
+    # quoted ``tags.k8s.*`` attribute names.  The legacy ``IN (...)``
+    # syntax triggers "legacy filters no longer supported" in the NR UI.
+    # Cluster explorer requires a cluster GUID for the direct view;
+    # without it, falls back to the entity list.
 
-    _K8S_DOMAINS = "'EXT','INFRA','UNINSTRUMENTED'"
+    def k8s_explorer(
+        self,
+        namespace: str | None = None,
+        *,
+        cluster: str | None = None,
+        cluster_guid: str | None = None,
+        since_minutes: int = 5,
+    ) -> str | None:
+        """Open the K8s cluster explorer.
 
-    _K8S_ENTITY_TYPES = (
-        "'ARGOCD','CALICO','COREDNS','ENVOY','ISTIO_SERVICE','KEDA',"
-        "'NGINX_INGRESS_CONTROLLER','PROMETHEUS_SERVER',"
-        "'KUBERNETESCLUSTER','KUBERNETES_APISERVER','KUBERNETES_CRONJOB',"
-        "'KUBERNETES_DAEMONSET','KUBERNETES_DEPLOYMENT','KUBERNETES_JOB',"
-        "'KUBERNETES_NAMESPACE','KUBERNETES_PERSISTENTVOLUME',"
-        "'KUBERNETES_PERSISTENTVOLUMECLAIM','KUBERNETES_POD',"
-        "'KUBERNETES_REPLICASET','KUBERNETES_STATEFULSET'"
-    )
+        Verified 2026-04: the canonical K8s cluster view is
+        ``/nr1-core/kubernetes-cluster-explorer/k8s-cluster-explorer/{GUID}``.
+        When ``cluster_guid`` is available it opens the cluster directly.
+        Without a GUID, falls back to the entity list filtered to
+        ``KUBERNETESCLUSTER`` entities, optionally scoped by cluster name.
 
-    def _k8s_base_filter(self) -> str:
-        return (
-            f"domain IN ({self._K8S_DOMAINS})"
-            f" AND type IN ({self._K8S_ENTITY_TYPES})"
-        )
-
-    def k8s_explorer(self, namespace: str | None = None, *, cluster: str | None = None) -> str | None:
-        """Open the K8s cluster explorer, optionally filtered to a namespace and/or cluster."""
+        The legacy ``/nr1-core?filters=(domain IN (...) AND type IN (...))``
+        syntax triggers "legacy filters no longer supported" in the NR UI.
+        """
         try:
-            filter_expr = self._k8s_base_filter()
-            if namespace:
-                filter_expr += (
-                    f" AND tags.namespaceName = '{namespace}'"
+            if cluster_guid:
+                filter_expr = "(domain = 'INFRA' AND type = 'KUBERNETESCLUSTER')"
+                return (
+                    f"{self._base}/nr1-core/kubernetes-cluster-explorer/"
+                    f"k8s-cluster-explorer/{cluster_guid}"
+                    f"?account={self._account_id}"
+                    f"&duration={since_minutes * 60 * 1000}"
+                    f"&filters={urllib.parse.quote(filter_expr, safe='')}"
                 )
-            if cluster:
-                filter_expr += (
-                    f" AND tags.clusterName = '{cluster}'"
-                )
+
+            # Fallback: entity list filtered to K8s clusters.
+            # Note: KUBERNETESCLUSTER entities do not have tags.k8s.clusterName
+            # on themselves (the cluster name is the entity name), so we
+            # cannot filter by cluster name here — just list all clusters.
+            filter_expr = "(domain = 'INFRA' AND type = 'KUBERNETESCLUSTER')"
             return (
                 f"{self._base}/nr1-core"
                 f"?account={self._account_id}"
-                f"&filters={urllib.parse.quote(f'({filter_expr})', safe='')}"
+                f"&filters={urllib.parse.quote(filter_expr, safe='')}"
             )
         except Exception:
             return None
@@ -323,8 +328,14 @@ class DeepLinkBuilder:
     def k8s_workload(
         self, namespace: str, deployment_name: str, *,
         cluster: str | None = None, deployment_guid: str | None = None,
+        since_minutes: int = 5,
     ) -> str | None:
         """Open K8s view filtered to a specific deployment.
+
+        Verified 2026-04: the correct NR1 filter syntax uses simple
+        ``domain = 'INFRA' AND type = 'KUBERNETES_DEPLOYMENT'`` with
+        backtick-quoted ``tags.k8s.*`` attribute names.  The legacy
+        ``domain IN (...)`` / ``type IN (...)`` syntax is rejected.
 
         When ``deployment_guid`` is supplied, routes to the canonical
         ``k8s-deployment-overview/{guid}`` entity view URL.  Falls back
@@ -332,45 +343,61 @@ class DeepLinkBuilder:
         """
         try:
             if deployment_guid:
-                # Canonical entity view with filter expression.
-                filter_parts = [
-                    f"(name LIKE '{deployment_name}' OR id = '{deployment_name}'"
-                    f" OR domainId = '{deployment_name}')",
-                    "(domain = 'INFRA' AND type = 'KUBERNETES_DEPLOYMENT')",
-                    f"`tags.namespace` = '{namespace}'",
-                ]
+                filter_expr = (
+                    "(domain = 'INFRA' AND type = 'KUBERNETES_DEPLOYMENT')"
+                )
                 if cluster:
-                    filter_parts.append(f"`tags.clusterName` = '{cluster}'")
-                filter_expr = " AND ".join(filter_parts)
+                    filter_expr += (
+                        f" AND `tags.k8s.clusterName` = '{cluster}'"
+                    )
+                filter_expr += (
+                    f" AND `tags.k8s.deploymentName` = '{deployment_name}'"
+                )
                 return (
                     f"{self._base}/nr1-core/kubernetes-cluster-explorer/"
                     f"k8s-deployment-overview/{deployment_guid}"
                     f"?account={self._account_id}"
+                    f"&duration={since_minutes * 60 * 1000}"
                     f"&filters={urllib.parse.quote(filter_expr, safe='')}"
                 )
 
-            # Fallback: entity search with filter expression.
+            # Fallback: entity list filtered to this deployment.
             filter_expr = (
-                f"{self._k8s_base_filter()}"
-                f" AND tags.namespaceName = '{namespace}'"
-                f" AND tags.deploymentName = '{deployment_name}'"
+                "(domain = 'INFRA' AND type = 'KUBERNETES_DEPLOYMENT')"
             )
             if cluster:
-                filter_expr += f" AND tags.clusterName = '{cluster}'"
+                filter_expr += (
+                    f" AND `tags.k8s.clusterName` = '{cluster}'"
+                )
+            filter_expr += (
+                f" AND `tags.k8s.deploymentName` = '{deployment_name}'"
+            )
             return (
                 f"{self._base}/nr1-core"
                 f"?account={self._account_id}"
-                f"&filters={urllib.parse.quote(f'({filter_expr})', safe='')}"
+                f"&filters={urllib.parse.quote(filter_expr, safe='')}"
             )
         except Exception:
             return None
 
     # ── Synthetic links ────────────────────────────────────────────
 
-    def synthetic_monitor(self, entity_guid: str) -> str | None:
-        """Open synthetic monitor detail page."""
+    def synthetic_monitor(
+        self, entity_guid: str, since_minutes: int = 30
+    ) -> str | None:
+        """Open synthetic monitor overview page.
+
+        Verified 2026-04: the direct ``/synthetics/monitor-overview/<GUID>``
+        route with ``account`` and ``duration`` params lands on the monitor
+        summary page without a redirect hop. The old ``entity_link`` redirect
+        works too but loses the duration context.
+        """
         try:
-            return self.entity_link(entity_guid)
+            return (
+                f"{self._base}/synthetics/monitor-overview/{entity_guid}"
+                f"?account={self._account_id}"
+                f"&duration={since_minutes * 60 * 1000}"
+            )
         except Exception:
             return None
 
@@ -383,14 +410,14 @@ class DeepLinkBuilder:
         """Open synthetic monitor run results.
 
         Verified 2026-04: the correct NR1 route is
-        ``/synthetics/monitor-result-list/<GUID>``. The old
-        ``?nerdletId=synthetics-nerdlets...`` redirect URL silently lands
-        on the monitor summary page instead of the results list.
+        ``/synthetics/monitor-result-list/<GUID>`` with ``account``
+        and ``duration`` params.
         """
         try:
             url = (
                 f"{self._base}/synthetics/monitor-result-list/{entity_guid}"
-                f"?duration={since_minutes * 60 * 1000}"
+                f"?account={self._account_id}"
+                f"&duration={since_minutes * 60 * 1000}"
             )
             if result_filter:
                 url += f"&result={result_filter}"
@@ -507,28 +534,12 @@ class DeepLinkBuilder:
         since_minutes: int = 60,
         limit: int = 100,
     ) -> str | None:
-        """Open New Relic Query Builder pre-loaded with a log search NRQL.
+        """Retired — NR no longer supports a query-builder deep link.
 
-        Uses nrql_chart() with the pane= format to pre-load the NRQL
-        query in the query builder. Reliable across all attribute names
-        including dotted ones like entity.name.
+        Delegates to :meth:`nrql_chart` which returns ``None``.
+        The NRQL query is included in the tool response body instead.
         """
-        try:
-            sev_attr = "level"
-            nrql = (
-                f"SELECT timestamp, message, `{service_attribute}`, {sev_attr} "
-                f"FROM Log "
-                f"WHERE `{service_attribute}` LIKE '%{service_name}%'"
-            )
-            if severity:
-                levels = ", ".join(f"'{s.strip()}'" for s in severity.split(","))
-                nrql += f" AND `{sev_attr}` IN ({levels})"
-            if keyword:
-                nrql += f" AND message LIKE '%{keyword}%'"
-            nrql += f" SINCE {since_minutes} minutes ago ORDER BY timestamp DESC LIMIT {min(limit, 100)}"
-            return self.nrql_chart(nrql, since_minutes)
-        except Exception:
-            return None
+        return None
 
 
 # ── Module-level convenience ─────────────────────────────────────────────

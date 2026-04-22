@@ -54,62 +54,89 @@ def _context_us(mock_credentials, mock_intelligence):
 
 
 class TestNrqlChart:
-    """nrql_chart() returns the bare New Relic Query Builder URL.
+    """nrql_chart() returns None — NR retired the query builder launcher URL.
 
-    New Relic's current router (verified 2026-04) rejects client-side NRQL
-    pre-loading via URL parameters and redirects to the home page. Any attempt
-    to pass ``query=``, ``nrql=``, ``pane=`` or ``#fragment`` NRQL silently
-    redirects. The bare ``?account=<id>`` form is the only verified-working
-    format. Callers include the NRQL in their response body so users can paste.
+    As of 2026-04, ``/launcher/data-exploration.query-builder?pane=`` redirects
+    to the Notebooks page. The query builder is now a bottom-panel overlay
+    ("Query your data") on every NR page with no URL-based pre-loading.
+    Tool responses include the raw NRQL in the response body for copy-paste.
     """
 
-    def test_nrql_chart_returns_url(self, builder_us):
+    def test_nrql_chart_returns_none(self, builder_us):
         nrql = "SELECT count(*) FROM Transaction WHERE appName = 'my-svc' SINCE 30 minutes ago"
-        url = builder_us.nrql_chart(nrql, 30)
-        assert url is not None
-        assert isinstance(url, str)
+        assert builder_us.nrql_chart(nrql, 30) is None
 
-    def test_nrql_chart_us_region_uses_correct_base(self, builder_us):
-        url = builder_us.nrql_chart("SELECT 1", 10)
-        assert url is not None
-        assert url.startswith(NR_BASE_US)
-        assert NR_BASE_EU not in url
+    def test_nrql_chart_returns_none_for_any_input(self, builder_us):
+        assert builder_us.nrql_chart("SELECT 1", 10) is None
+        assert builder_us.nrql_chart("", 0) is None
+        assert builder_us.nrql_chart(None, None) is None
 
-    def test_nrql_chart_eu_region_uses_correct_base(self, builder_eu):
-        url = builder_eu.nrql_chart("SELECT 1", 10)
+    def test_nrql_chart_eu_also_returns_none(self, builder_eu):
+        assert builder_eu.nrql_chart("SELECT 1", 10) is None
+
+    def test_spike_chart_returns_none(self, builder_us):
+        assert builder_us.spike_chart("SELECT 1 TIMESERIES", 10) is None
+
+    def test_spike_chart_returns_none_for_any_input(self, builder_us):
+        assert builder_us.spike_chart(None, None) is None
+        assert builder_us.spike_chart("", 0) is None
+
+
+# ── APM overview tests ───────────────────────────────────────────────────
+
+
+class TestApmOverview:
+    """APM overview link — verified against live NR URLs."""
+
+    def test_apm_overview_path(self, builder_us):
+        """Verified 2026-04: NR route is /nr1-core/apm/overview/<GUID>."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMjg4NDUyMw"
+        url = builder_us.apm_overview(guid)
         assert url is not None
+        assert f"/nr1-core/apm/overview/{guid}" in url
+
+    def test_apm_overview_has_account_param(self, builder_us):
+        """account= is REQUIRED — without it NR redirects to home."""
+        guid = "GUID-1"
+        url = builder_us.apm_overview(guid)
+        assert "account=123456" in url
+
+    def test_apm_overview_has_duration_param(self, builder_us):
+        """duration= in milliseconds, default 30 min = 1800000."""
+        guid = "GUID-1"
+        url = builder_us.apm_overview(guid)
+        # Default 30 min: 30 * 60 * 1000 = 1800000
+        assert "duration=1800000" in url
+
+    def test_apm_overview_custom_duration(self, builder_us):
+        guid = "GUID-1"
+        url = builder_us.apm_overview(guid, since_minutes=60)
+        # 60 * 60 * 1000 = 3600000
+        assert "duration=3600000" in url
+
+    def test_apm_overview_param_order_account_first(self, builder_us):
+        """account= must appear before duration=."""
+        guid = "GUID-1"
+        url = builder_us.apm_overview(guid)
+        account_pos = url.index("account=")
+        duration_pos = url.index("duration=")
+        assert account_pos < duration_pos
+
+    def test_apm_overview_eu_region(self, builder_eu):
+        guid = "GUID-1"
+        url = builder_eu.apm_overview(guid)
         assert url.startswith(NR_BASE_EU)
-        assert NR_BASE_US not in url
+        assert "account=789012" in url
 
-    def test_nrql_chart_contains_account_id(self, builder_us):
-        url = builder_us.nrql_chart("SELECT 1", 10)
-        assert "platform[accountId]=123456" in url
-
-    def test_nrql_chart_path(self, builder_us):
-        url = builder_us.nrql_chart("SELECT 1", 10)
-        # Uses the launcher with a base64 pane= payload to pre-load NRQL.
-        assert "/launcher/data-exploration.query-builder" in url
-        assert "pane=" in url
-
-    def test_nrql_chart_no_redirect_triggering_params(self, builder_us):
-        """URL must use pane= with base64-encoded JSON to pre-load NRQL.
-
-        The pane= parameter carries a JSON payload with the nerdletId,
-        initialNrqlValue, and initialAccountId.  Raw ``query=``,
-        ``nrql=``, and ``state=`` params must NOT appear.
-        """
-        nrql = "SELECT count(*) FROM Transaction WHERE appName = 'eswd-prod/sifi-adapter' AND `http.statusCode` >= 500 SINCE 3 hours ago FACET request.uri TIMESERIES 10 minutes"
-        url = builder_us.nrql_chart(nrql, 180)
-        assert url is not None
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        assert "query" not in params
-        assert "nrql" not in params
-        assert "state" not in params
-        # pane= IS expected — it carries the base64-encoded config.
-        assert "pane" in params
-        # No URL fragment — fragments can trigger redirects.
-        assert parsed.fragment == ""
+    def test_apm_overview_matches_verified_pattern(self, builder_us):
+        """Full URL must match the exact pattern from NR browser."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMjg4NDUyMw"
+        url = builder_us.apm_overview(guid, since_minutes=30)
+        expected = (
+            f"{NR_BASE_US}/nr1-core/apm/overview/{guid}"
+            f"?account=123456&duration=1800000"
+        )
+        assert url == expected
 
 
 # ── Entity link tests ────────────────────────────────────────────────────
@@ -132,16 +159,54 @@ class TestEntityLink:
 
 
 class TestApmErrors:
+    """APM errors inbox and transactions links — verified against live NR URLs."""
+
     def test_apm_errors_uses_nr1_core_errors_inbox_path(self, builder_us):
         """Verified 2026-04: NR route is /nr1-core/errors-inbox/entity-inbox/<GUID>."""
         guid = "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx"
         url = builder_us.apm_errors(guid)
         assert url is not None
         assert f"/nr1-core/errors-inbox/entity-inbox/{guid}" in url
-        assert "duration=" in url
-        # Legacy (broken) patterns must not be present.
+
+    def test_apm_errors_has_account_param(self, builder_us):
+        """account= is REQUIRED — without it NR redirects to home."""
+        guid = "MTIzNDU2fEFQTXxBUFBMSUNBVElPTnwx"
+        url = builder_us.apm_errors(guid)
+        assert "account=123456" in url
+
+    def test_apm_errors_has_duration_param(self, builder_us):
+        """duration= in milliseconds."""
+        guid = "GUID-1"
+        url = builder_us.apm_errors(guid, since_minutes=30)
+        # 30 * 60 * 1000 = 1800000
+        assert "duration=1800000" in url
+
+    def test_apm_errors_has_filters_param(self, builder_us):
+        """filters=selectedInstance IN () is required for the page to load correctly."""
+        guid = "GUID-1"
+        url = builder_us.apm_errors(guid)
+        assert "filters=selectedInstance%20IN%20%28%29" in url
+
+    def test_apm_errors_param_order_account_first(self, builder_us):
+        """account= must appear before duration= (NR parser is order-sensitive)."""
+        guid = "GUID-1"
+        url = builder_us.apm_errors(guid)
+        account_pos = url.index("account=")
+        duration_pos = url.index("duration=")
+        assert account_pos < duration_pos
+
+    def test_apm_errors_no_legacy_patterns(self, builder_us):
+        """Legacy patterns that cause silent redirect must NOT appear."""
+        guid = "GUID-1"
+        url = builder_us.apm_errors(guid)
         assert "nerdletId=errors-inbox.homepage" not in url
         assert f"/redirect/entity/{guid}" not in url
+
+    def test_apm_errors_eu_region(self, builder_eu):
+        guid = "GUID-1"
+        url = builder_eu.apm_errors(guid)
+        assert url.startswith(NR_BASE_EU)
+        assert "account=789012" in url
 
     def test_apm_transactions_uses_nr1_core_apm_features_path(self, builder_us):
         """Verified 2026-04: NR route is /nr1-core/apm-features/transactions/<GUID>."""
@@ -149,53 +214,183 @@ class TestApmErrors:
         url = builder_us.apm_transactions(guid)
         assert url is not None
         assert f"/nr1-core/apm-features/transactions/{guid}" in url
-        assert "duration=" in url
-        # Legacy (broken) pattern must not be present.
+
+    def test_apm_transactions_has_account_param(self, builder_us):
+        """account= is REQUIRED — without it NR redirects to home."""
+        guid = "GUID123"
+        url = builder_us.apm_transactions(guid)
+        assert "account=123456" in url
+
+    def test_apm_transactions_has_duration_param(self, builder_us):
+        guid = "GUID123"
+        url = builder_us.apm_transactions(guid, since_minutes=30)
+        assert "duration=1800000" in url
+
+    def test_apm_transactions_has_filters_param(self, builder_us):
+        """filters=selectedInstance IN () is required for the page to load correctly."""
+        guid = "GUID123"
+        url = builder_us.apm_transactions(guid)
+        assert "filters=selectedInstance%20IN%20%28%29" in url
+
+    def test_apm_transactions_param_order_account_first(self, builder_us):
+        """account= must appear before duration=."""
+        guid = "GUID123"
+        url = builder_us.apm_transactions(guid)
+        account_pos = url.index("account=")
+        duration_pos = url.index("duration=")
+        assert account_pos < duration_pos
+
+    def test_apm_transactions_no_legacy_patterns(self, builder_us):
+        guid = "GUID123"
+        url = builder_us.apm_transactions(guid)
         assert "nerdletId=apm-nerdlets.apm-transactions-nerdlet" not in url
+
+    def test_apm_transactions_eu_region(self, builder_eu):
+        guid = "GUID123"
+        url = builder_eu.apm_transactions(guid)
+        assert url.startswith(NR_BASE_EU)
+        assert "account=789012" in url
+
+    def test_apm_errors_matches_verified_pattern(self, builder_us):
+        """Full URL must match the exact pattern from NR browser."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMjg4NDUyMw"
+        url = builder_us.apm_errors(guid, since_minutes=30)
+        expected = (
+            f"{NR_BASE_US}/nr1-core/errors-inbox/entity-inbox/{guid}"
+            f"?account=123456&duration=1800000"
+            f"&filters=selectedInstance%20IN%20%28%29"
+        )
+        assert url == expected
+
+    def test_apm_transactions_matches_verified_pattern(self, builder_us):
+        """Full URL must match the exact pattern from NR browser."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMjg4NDUyMw"
+        url = builder_us.apm_transactions(guid, since_minutes=30)
+        expected = (
+            f"{NR_BASE_US}/nr1-core/apm-features/transactions/{guid}"
+            f"?account=123456&duration=1800000"
+            f"&filters=selectedInstance%20IN%20%28%29"
+        )
+        assert url == expected
 
 
 # ── K8s tests ────────────────────────────────────────────────────────────
 
 
 class TestK8sLinks:
+    """K8s links verified 2026-04: NR uses simple equality filters with
+    backtick-quoted ``tags.k8s.*`` attribute names.  The legacy
+    ``domain IN (...)`` / ``type IN (...)`` syntax is rejected."""
+
     def test_k8s_workload_encodes_filters(self, builder_us):
-        url = builder_us.k8s_workload("payments-prod", "payment-svc")
+        url = builder_us.k8s_workload("prod", "payment-svc")
         assert url is not None
         decoded = urllib.parse.unquote(url)
-        assert "namespaceName" in decoded
-        assert "deploymentName" in decoded
-        assert "payment-svc" in decoded
-        assert "payments-prod" in decoded
+        assert "`tags.k8s.deploymentName` = 'payment-svc'" in decoded
 
     def test_k8s_workload_uses_nr1_core_path(self, builder_us):
-        """Legacy /kubernetes route redirects to Catalog; /nr1-core works."""
-        url = builder_us.k8s_workload("payments-prod", "payment-svc")
+        url = builder_us.k8s_workload("prod", "payment-svc")
         assert "/nr1-core" in url
         assert "/kubernetes" not in url
         assert "account=123456" in url
 
-    def test_k8s_explorer_with_namespace(self, builder_us):
-        url = builder_us.k8s_explorer("my-ns")
-        assert url is not None
-        assert "/nr1-core" in url
+    def test_k8s_workload_uses_simple_domain_type_filter(self, builder_us):
+        url = builder_us.k8s_workload("prod", "payment-svc")
         decoded = urllib.parse.unquote(url)
-        assert "namespaceName" in decoded
-        assert "my-ns" in decoded
+        assert "(domain = 'INFRA' AND type = 'KUBERNETES_DEPLOYMENT')" in decoded
+        # Must NOT contain legacy IN (...) syntax
+        assert "domain IN" not in decoded
+        assert "type IN" not in decoded
 
-    def test_k8s_explorer_without_namespace(self, builder_us):
+    def test_k8s_workload_with_cluster(self, builder_us):
+        url = builder_us.k8s_workload("prod", "payment-svc", cluster="my-cluster")
+        decoded = urllib.parse.unquote(url)
+        assert "`tags.k8s.clusterName` = 'my-cluster'" in decoded
+
+    def test_k8s_workload_no_legacy_tags(self, builder_us):
+        """tags.namespaceName and tags.deploymentName are legacy — must use tags.k8s.* prefix."""
+        url = builder_us.k8s_workload("prod", "payment-svc", cluster="c1")
+        decoded = urllib.parse.unquote(url)
+        # Must NOT have un-prefixed tag names
+        assert "tags.namespaceName" not in decoded
+        assert "tags.deploymentName" not in decoded
+        assert "tags.clusterName" not in decoded  # without k8s. prefix
+
+    def test_k8s_explorer_without_args(self, builder_us):
         url = builder_us.k8s_explorer()
         assert url is not None
         assert "/nr1-core" in url
-        # filters still present (K8s entity type filter) — just no namespace
         decoded = urllib.parse.unquote(url)
-        assert "KUBERNETES_DEPLOYMENT" in decoded
-        assert "namespaceName" not in decoded
+        assert "(domain = 'INFRA' AND type = 'KUBERNETESCLUSTER')" in decoded
+
+    def test_k8s_explorer_with_cluster_name_no_guid(self, builder_us):
+        """Without GUID, cluster name is ignored (KUBERNETESCLUSTER entities
+        don't have tags.k8s.clusterName on themselves)."""
+        url = builder_us.k8s_explorer(cluster="my-cluster")
+        decoded = urllib.parse.unquote(url)
+        assert "(domain = 'INFRA' AND type = 'KUBERNETESCLUSTER')" in decoded
+        # cluster name NOT in URL — can't filter by it
+        assert "clusterName" not in decoded
+
+    def test_k8s_explorer_with_cluster_guid(self, builder_us):
+        url = builder_us.k8s_explorer(cluster_guid="CLUSTER-GUID-001")
+        assert url is not None
+        assert "/nr1-core/kubernetes-cluster-explorer/k8s-cluster-explorer/CLUSTER-GUID-001" in url
+        assert "account=123456" in url
+        assert "duration=" in url
+
+    def test_k8s_explorer_no_legacy_in_syntax(self, builder_us):
+        """Legacy IN (...) syntax triggers 'legacy filters no longer supported'."""
+        url = builder_us.k8s_explorer()
+        decoded = urllib.parse.unquote(url)
+        assert "domain IN" not in decoded
+        assert "type IN" not in decoded
+
+    def test_k8s_explorer_eu_region(self, builder_eu):
+        url = builder_eu.k8s_explorer()
+        assert url.startswith(NR_BASE_EU)
 
 
 # ── Synthetic tests ──────────────────────────────────────────────────────
 
 
 class TestSyntheticLinks:
+    """Synthetic monitor links — verified against live NR URLs 2026-04.
+
+    Verified patterns:
+    - synthetic_monitor: /synthetics/monitor-overview/{GUID}?account={ID}&duration={ms}
+    - synthetic_results: /synthetics/monitor-result-list/{GUID}?account={ID}&duration={ms}
+    """
+
+    def test_synthetic_monitor_uses_monitor_overview_path(self, builder_us):
+        """Verified 2026-04: direct /synthetics/monitor-overview/<GUID> route."""
+        guid = "SYNTH-GUID-001"
+        url = builder_us.synthetic_monitor(guid)
+        assert url is not None
+        assert f"/synthetics/monitor-overview/{guid}" in url
+
+    def test_synthetic_monitor_has_account_param(self, builder_us):
+        """account= is REQUIRED — without it NR may redirect to wrong account."""
+        url = builder_us.synthetic_monitor("G1")
+        assert "account=123456" in url
+
+    def test_synthetic_monitor_has_duration_param(self, builder_us):
+        url = builder_us.synthetic_monitor("G1", since_minutes=60)
+        assert "duration=3600000" in url
+
+    def test_synthetic_monitor_default_duration_30min(self, builder_us):
+        url = builder_us.synthetic_monitor("G1")
+        assert "duration=1800000" in url
+
+    def test_synthetic_monitor_no_redirect(self, builder_us):
+        """Must NOT use /redirect/entity/ — direct route is preferred."""
+        url = builder_us.synthetic_monitor("G1")
+        assert "/redirect/entity/" not in url
+
+    def test_synthetic_monitor_no_legacy_nerdlet(self, builder_us):
+        url = builder_us.synthetic_monitor("G1")
+        assert "synthetics-nerdlets" not in url
+
     def test_synthetic_results_uses_monitor_result_list_path(self, builder_us):
         """Verified 2026-04: NR route is /synthetics/monitor-result-list/<GUID>."""
         guid = "SYNTH-GUID-001"
@@ -208,17 +403,22 @@ class TestSyntheticLinks:
         assert "synthetics-nerdlets" not in url
         assert f"/redirect/entity/{guid}" not in url
 
+    def test_synthetic_results_has_account_param(self, builder_us):
+        """account= is REQUIRED — verified 2026-04."""
+        url = builder_us.synthetic_results("G1", 30)
+        assert "account=123456" in url
+
     def test_synthetic_results_without_filter(self, builder_us):
         url = builder_us.synthetic_results("G1", 30)
         assert url is not None
         assert "result=" not in url
         assert "/synthetics/monitor-result-list/G1" in url
 
-    def test_synthetic_monitor_delegates_to_entity_link(self, builder_us):
-        guid = "SYNTH-GUID-002"
-        url = builder_us.synthetic_monitor(guid)
-        expected = builder_us.entity_link(guid)
-        assert url == expected
+    def test_synthetic_results_param_order_account_before_duration(self, builder_us):
+        url = builder_us.synthetic_results("G1", 30)
+        account_pos = url.index("account=")
+        duration_pos = url.index("duration=")
+        assert account_pos < duration_pos
 
 
 # ── Alert tests ──────────────────────────────────────────────────────────
@@ -246,31 +446,125 @@ class TestAlertLinks:
 
 
 class TestDistributedTraces:
-    def test_distributed_traces_error_only_adds_filter(self, builder_us):
+    """Distributed trace list link — verified against live NR URLs."""
+
+    def test_distributed_traces_uses_nr1_core_path(self, builder_us):
+        """Verified 2026-04: NR route is /nr1-core/distributed-tracing/distributed-trace-list/<GUID>."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        url = builder_us.distributed_traces(guid, since_minutes=30)
+        assert url is not None
+        assert f"/nr1-core/distributed-tracing/distributed-trace-list/{guid}" in url
+
+    def test_distributed_traces_has_account_param(self, builder_us):
+        """account= is REQUIRED — without it NR redirects to home."""
         guid = "GUID-1"
-        url = builder_us.distributed_traces(guid, 60, error_only=True)
-        assert url is not None
-        assert "filters=" in url
-        # Decode the filter and verify content.
-        parsed = urllib.parse.urlparse(url)
-        params = urllib.parse.parse_qs(parsed.query)
-        filters_b64 = params["filters"][0]
-        decoded_filter = json.loads(base64.b64decode(filters_b64))
-        assert decoded_filter == {"error": True}
+        url = builder_us.distributed_traces(guid, since_minutes=30)
+        assert "account=123456" in url
 
-    def test_distributed_traces_no_error_filter_by_default(self, builder_us):
-        url = builder_us.distributed_traces("GUID-1", 30)
-        assert url is not None
-        assert "filters=" not in url
-
-    def test_distributed_traces_duration(self, builder_us):
-        url = builder_us.distributed_traces("GUID-1", 60)
+    def test_distributed_traces_has_duration_param(self, builder_us):
+        guid = "GUID-1"
+        url = builder_us.distributed_traces(guid, since_minutes=60)
         # 60 * 60 * 1000 = 3600000
         assert "duration=3600000" in url
 
-    def test_distributed_traces_entity_guid(self, builder_us):
-        url = builder_us.distributed_traces("MY-GUID", 30)
-        assert "entity.guid=MY-GUID" in url
+    def test_distributed_traces_has_filters_param(self, builder_us):
+        """filters=selectedInstance IN () is required."""
+        guid = "GUID-1"
+        url = builder_us.distributed_traces(guid)
+        assert "filters=selectedInstance%20IN%20%28%29" in url
+
+    def test_distributed_traces_param_order_account_first(self, builder_us):
+        guid = "GUID-1"
+        url = builder_us.distributed_traces(guid)
+        account_pos = url.index("account=")
+        duration_pos = url.index("duration=")
+        assert account_pos < duration_pos
+
+    def test_distributed_traces_no_legacy_global_explorer_path(self, builder_us):
+        """Legacy /distributed-tracing?entity.guid= opens global explorer, not entity-scoped."""
+        guid = "GUID-1"
+        url = builder_us.distributed_traces(guid)
+        assert "/distributed-tracing?" not in url
+        assert "entity.guid=" not in url
+        assert "accountId=" not in url
+
+    def test_distributed_traces_eu_region(self, builder_eu):
+        guid = "GUID-1"
+        url = builder_eu.distributed_traces(guid)
+        assert url.startswith(NR_BASE_EU)
+        assert "account=789012" in url
+
+    def test_distributed_traces_matches_verified_pattern(self, builder_us):
+        """Full URL must match the exact pattern from NR browser."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        url = builder_us.distributed_traces(guid, since_minutes=30)
+        expected = (
+            f"{NR_BASE_US}/nr1-core/distributed-tracing/"
+            f"distributed-trace-list/{guid}"
+            f"?account=123456&duration=1800000"
+            f"&filters=selectedInstance%20IN%20%28%29"
+        )
+        assert url == expected
+
+    def test_distributed_traces_error_only_param_accepted(self, builder_us):
+        """error_only param is accepted for API compat (no-op on entity-scoped route)."""
+        guid = "GUID-1"
+        url = builder_us.distributed_traces(guid, since_minutes=30, error_only=True)
+        assert url is not None
+        assert isinstance(url, str)
+
+
+# ── Service map tests ───────────────────────────────────────────────────
+
+
+class TestServiceMap:
+    """Service map (relationships map) link — verified against live NR URLs."""
+
+    def test_service_map_uses_entity_relationships_path(self, builder_us):
+        """Verified 2026-04: NR route is /nr1-core/entity-relationships-experience-maps/relationships-map-experience/<GUID>."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        url = builder_us.service_map(guid)
+        assert url is not None
+        assert f"/nr1-core/entity-relationships-experience-maps/relationships-map-experience/{guid}" in url
+
+    def test_service_map_has_account_param(self, builder_us):
+        guid = "GUID-1"
+        url = builder_us.service_map(guid)
+        assert "account=123456" in url
+
+    def test_service_map_has_duration_param(self, builder_us):
+        guid = "GUID-1"
+        url = builder_us.service_map(guid, since_minutes=30)
+        assert "duration=1800000" in url
+
+    def test_service_map_has_filters_param(self, builder_us):
+        guid = "GUID-1"
+        url = builder_us.service_map(guid)
+        assert "filters=selectedInstance%20IN%20%28%29" in url
+
+    def test_service_map_no_legacy_viz_param(self, builder_us):
+        """Legacy viz=service-map pattern no longer works."""
+        guid = "GUID-1"
+        url = builder_us.service_map(guid)
+        assert "viz=service-map" not in url
+
+    def test_service_map_eu_region(self, builder_eu):
+        guid = "GUID-1"
+        url = builder_eu.service_map(guid)
+        assert url.startswith(NR_BASE_EU)
+        assert "account=789012" in url
+
+    def test_service_map_matches_verified_pattern(self, builder_us):
+        """Full URL must match the exact pattern from NR browser."""
+        guid = "MzAwNzY3N3xBUE18QVBQTElDQVRJT058MTcwMzExMjUwOQ"
+        url = builder_us.service_map(guid, since_minutes=30)
+        expected = (
+            f"{NR_BASE_US}/nr1-core/entity-relationships-experience-maps/"
+            f"relationships-map-experience/{guid}"
+            f"?account=123456&duration=1800000"
+            f"&filters=selectedInstance%20IN%20%28%29"
+        )
+        assert url == expected
 
 
 # ── Error resilience tests ───────────────────────────────────────────────
@@ -281,10 +575,11 @@ class TestErrorResilience:
         """Pass None, empty string, garbage to every method — verify
         None returned and no exception raised."""
         # nrql_chart
-        assert builder_us.nrql_chart(None, None) is None or builder_us.nrql_chart("", 0) is not None
-        # spike_chart
-        result = builder_us.spike_chart(None, None)
-        assert result is None or isinstance(result, str)
+        # nrql_chart (retired — always None)
+        assert builder_us.nrql_chart(None, None) is None
+        assert builder_us.nrql_chart("", 0) is None
+        # spike_chart (retired — always None)
+        assert builder_us.spike_chart(None, None) is None
         # entity_link
         assert builder_us.entity_link("") is not None or builder_us.entity_link("") == ""
         # apm_errors with empty
@@ -293,9 +588,8 @@ class TestErrorResilience:
         # distributed_traces
         result = builder_us.distributed_traces("", 0, error_only=True)
         assert result is None or isinstance(result, str)
-        # log_search_nrql
-        result = builder_us.log_search_nrql(service_name="", service_attribute="", since_minutes=0)
-        assert result is None or isinstance(result, str)
+        # log_search_nrql (retired — always None)
+        assert builder_us.log_search_nrql(service_name="", service_attribute="", since_minutes=0) is None
         # log_search_ui
         result = builder_us.log_search_ui()
         assert result is None or isinstance(result, str)
@@ -548,10 +842,9 @@ class TestAlertLinkInjection:
 
 
 class TestLogSearchNrql:
-    """log_search_nrql() delegates to nrql_chart() with a pane= payload."""
+    """log_search_nrql() returns None — NR retired the query builder launcher."""
 
-    def test_log_search_nrql_uses_logger_path(self):
-        """log_search_nrql() must route to the query-builder with pane= payload."""
+    def test_log_search_nrql_returns_none(self):
         builder = DeepLinkBuilder(account_id="3007677", region="US")
         url = builder.log_search_nrql(
             service_name="tagging-service",
@@ -560,30 +853,21 @@ class TestLogSearchNrql:
             keyword="HikariPool",
             since_minutes=60,
         )
-        assert url is not None
-        assert "/launcher/data-exploration.query-builder" in url
-        assert "pane=" in url
+        assert url is None
 
-    def test_log_search_nrql_contains_account_id(self):
+    def test_log_search_nrql_returns_none_for_any_input(self):
         builder = DeepLinkBuilder(account_id="3007677", region="US")
-        url = builder.log_search_nrql(
-            service_name="tagging-service",
-            service_attribute="entity.name",
-            keyword="HikariPool",
-            since_minutes=60,
-        )
-        assert "platform[accountId]=3007677" in url
+        assert builder.log_search_nrql(
+            service_name="", service_attribute="", since_minutes=0,
+        ) is None
 
-    def test_log_search_nrql_accepts_dotted_attribute(self):
-        """entity.name attribute must not cause the builder to fail."""
+    def test_log_search_nrql_returns_none_with_dotted_attribute(self):
         builder = DeepLinkBuilder(account_id="3007677", region="US")
-        url = builder.log_search_nrql(
+        assert builder.log_search_nrql(
             service_name="tagging-service",
             service_attribute="entity.name",
             since_minutes=60,
-        )
-        assert url is not None
-        assert isinstance(url, str)
+        ) is None
 
 
 # ── log_search_ui tests ─────────────────────────────────────────────────
@@ -717,61 +1001,76 @@ class TestLogSearchUi:
 
 
 class TestK8sWorkloadWithGuid:
-    """k8s_workload() with optional deployment_guid parameter."""
+    """k8s_workload() with optional deployment_guid parameter.
+    Verified 2026-04: filter uses backtick-quoted tags.k8s.* names."""
 
     def test_k8s_workload_with_guid_uses_entity_view_url(self):
         builder = DeepLinkBuilder(account_id="123456", region="US")
         url = builder.k8s_workload(
-            "payments-prod", "payment-svc",
+            "prod", "payment-svc",
             deployment_guid="K8S-DEPLOY-GUID-001",
         )
         assert url is not None
         assert "/nr1-core/kubernetes-cluster-explorer/k8s-deployment-overview/K8S-DEPLOY-GUID-001" in url
         assert "account=123456" in url
+        assert "duration=" in url
+
+    def test_k8s_workload_with_guid_has_correct_filter(self):
+        builder = DeepLinkBuilder(account_id="123456", region="US")
+        url = builder.k8s_workload(
+            "prod", "payment-svc",
+            deployment_guid="K8S-DEPLOY-GUID-001",
+        )
+        decoded = urllib.parse.unquote(url)
+        assert "(domain = 'INFRA' AND type = 'KUBERNETES_DEPLOYMENT')" in decoded
+        assert "`tags.k8s.deploymentName` = 'payment-svc'" in decoded
 
     def test_k8s_workload_without_guid_uses_fallback_filter_url(self):
         builder = DeepLinkBuilder(account_id="123456", region="US")
-        url = builder.k8s_workload("payments-prod", "payment-svc")
+        url = builder.k8s_workload("prod", "payment-svc")
         assert url is not None
         assert "/nr1-core" in url
         decoded = urllib.parse.unquote(url)
-        assert "deploymentName" in decoded
-        assert "payment-svc" in decoded
+        assert "`tags.k8s.deploymentName` = 'payment-svc'" in decoded
         # Should NOT contain k8s-deployment-overview (no GUID).
         assert "k8s-deployment-overview" not in url
 
     def test_k8s_workload_with_guid_and_cluster_includes_cluster_tag(self):
         builder = DeepLinkBuilder(account_id="123456", region="US")
         url = builder.k8s_workload(
-            "payments-prod", "payment-svc",
+            "prod", "payment-svc",
             deployment_guid="K8S-DEPLOY-GUID-001",
             cluster="cluster-a",
         )
         assert url is not None
         decoded = urllib.parse.unquote(url)
-        assert "`tags.clusterName` = 'cluster-a'" in decoded
+        assert "`tags.k8s.clusterName` = 'cluster-a'" in decoded
 
-    def test_k8s_workload_filter_includes_backticked_namespace_tag(self):
+    def test_k8s_workload_with_guid_no_legacy_tags(self):
+        """Must use tags.k8s.* not tags.namespace or tags.clusterName."""
         builder = DeepLinkBuilder(account_id="123456", region="US")
         url = builder.k8s_workload(
-            "payments-prod", "payment-svc",
+            "prod", "payment-svc",
             deployment_guid="K8S-DEPLOY-GUID-001",
+            cluster="cluster-a",
         )
-        assert url is not None
         decoded = urllib.parse.unquote(url)
-        assert "`tags.namespace` = 'payments-prod'" in decoded
+        # Must NOT have legacy tag names
+        assert "`tags.namespace`" not in decoded
+        assert "`tags.clusterName`" not in decoded
+        assert "domainId" not in decoded
+        assert "name LIKE" not in decoded
 
     def test_k8s_workload_without_guid_with_cluster(self):
         """Fallback path also threads cluster into filter."""
         builder = DeepLinkBuilder(account_id="123456", region="US")
         url = builder.k8s_workload(
-            "payments-prod", "payment-svc",
+            "prod", "payment-svc",
             cluster="main-cluster",
         )
         assert url is not None
         decoded = urllib.parse.unquote(url)
-        assert "clusterName" in decoded
-        assert "main-cluster" in decoded
+        assert "`tags.k8s.clusterName` = 'main-cluster'" in decoded
 
 
 # ── Routing invariant tests (AST-based regression prevention) ────────────
