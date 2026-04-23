@@ -1,7 +1,7 @@
 """
 Sherlock — main entry point.
 
-Registers all 23 MCP tools, configures logging, and starts the
+Registers all 24 MCP tools, configures logging, and starts the
 stdio-based MCP server. All tool responses are scrubbed for prompt
 injection before being returned to the client.
 """
@@ -98,6 +98,7 @@ from tools.intelligence_tools import (
     get_structured_report_tool,
     learn_account_tool,
     list_profiles,
+    resolve_account,
 )
 from tools.k8s import get_k8s_health
 from tools.logs import search_logs
@@ -136,6 +137,14 @@ TOOLS: list[Tool] = [
                         "Saved profile name to connect from (loads credentials "
                         "from keychain). When provided, account_id and api_key "
                         "are not required."
+                    ),
+                },
+                "service_name": {
+                    "type": "string",
+                    "description": (
+                        "Service name to auto-resolve the account from memory. "
+                        "When provided without profile_name or account_id, Sherlock "
+                        "looks up which account owns this service and connects directly."
                     ),
                 },
             },
@@ -548,6 +557,26 @@ TOOLS: list[Tool] = [
             "required": ["service_name"],
         },
     ),
+    # 24. resolve_account
+    Tool(
+        name="resolve_account",
+        description=(
+            "Resolve which New Relic account a service belongs to. "
+            "Call BEFORE connect_account when investigating a service. "
+            "Returns the profile_name and account_id for instant connection, "
+            "skipping the learn cycle if the service was previously indexed."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "service_name": {
+                    "type": "string",
+                    "description": "The service, monitor, or entity name to look up.",
+                },
+            },
+            "required": ["service_name"],
+        },
+    ),
 ]
 
 # ── Tool dispatch map ────────────────────────────────────────────────────
@@ -576,6 +605,7 @@ TOOL_HANDLERS = {
     "get_service_incidents": get_service_incidents,
     "run_nrql_query": run_nrql_query,
     "get_service_dependencies": get_service_dependencies,
+    "resolve_account": lambda args: resolve_account(**args),
 }
 
 # ── MCP Server ───────────────────────────────────────────────────────────

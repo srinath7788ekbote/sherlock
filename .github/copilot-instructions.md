@@ -142,8 +142,7 @@ All tools are exposed via the Sherlock MCP server. Call them directly by name.
 ### Connection (ALWAYS FIRST)
 
 | Tool | Purpose |
-|------|---------|
-| `mcp_sherlock_connect_account` | Connect to NR account — **REQUIRED before all others** |
+|------|---------|| `mcp_sherlock_resolve_account` | Look up which account owns a service — call BEFORE connect to skip learning || `mcp_sherlock_connect_account` | Connect to NR account — **REQUIRED before all others** |
 | `mcp_sherlock_learn_account` | Discover ALL entity names, types, relationships — **REQUIRED for investigations** |
 | `mcp_sherlock_list_profiles` | List saved credential profiles |
 | `mcp_sherlock_get_account_summary` | Full account intelligence summary |
@@ -152,7 +151,8 @@ All tools are exposed via the Sherlock MCP server. Call them directly by name.
 ### Pre-Flight Protocol (MANDATORY for all investigations)
 
 ```
-Step 1: mcp_sherlock_connect_account()        ← connect
+Step 0: mcp_sherlock_resolve_account(service)  ← check if service’s account is known
+Step 1: mcp_sherlock_connect_account()        ← connect (use profile from Step 0 if found)
 Step 2: mcp_sherlock_learn_account()           ← discover real entity names
 Step 3: Parse service name → full/bare/ns      ← name resolution
 Step 4: mcp_sherlock_get_nrql_context("all")  ← optional, for NRQL attribute names
@@ -227,7 +227,7 @@ Sherlock MCP now works inside VS Code CLI agents, not just Copilot Chat.
 **CLI agent rules:**
 - connect_account MUST still be called first — CLI agents do not inherit
   Copilot Chat session context
-- All 21 tools are available identically in CLI and Chat agents
+- All 24 tools are available identically in CLI and Chat agents
 - Use `--debug` flag in CLI agent to view Sherlock MCP server logs inline
 
 ---

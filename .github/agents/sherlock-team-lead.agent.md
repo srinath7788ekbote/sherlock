@@ -100,7 +100,13 @@ correct tool and naming conventions.
 Before spawning any domain agent, the Team Lead MUST complete these steps:
 
 ```
+STEP 0.0: mcp_sherlock_resolve_account(service_name)
+          → Check if the service's account is already known in memory.
+          → If FOUND, use the returned profile_name in the next step.
+          → If NOT_FOUND, proceed with default profile.
 STEP 0.1: mcp_sherlock_connect_account (if not already connected)
+          → Use profile_name from Step 0.0 if available, or service_name param
+            for auto-resolution.
 STEP 0.2: mcp_sherlock_learn_account()
           → Discovers ALL entity names, types, and relationships in the account.
           → Caches the results for all subsequent agent calls.

@@ -40,7 +40,7 @@ A **production-ready, multi-tenant Model Context Protocol (MCP) server** for New
 
 ## Overview
 
-This MCP server exposes **23 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
+This MCP server exposes **24 tools** that let an AI assistant query your New Relic account in real time. It learns the shape of your account on connect (APM services, OpenTelemetry services, K8s namespaces, synthetic monitors, alert policies, log partitions, infrastructure hosts, browser apps, mobile apps, workloads) so every subsequent query is precise and context-aware.
 
 ### Key Capabilities
 
@@ -558,6 +558,7 @@ Response shape additions:
 | #  | Tool                       | Description                                                                                                                     |
 | -- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | 23 | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
+| 24 | `resolve_account`          | Resolve which New Relic account a service belongs to — call before connect_account to skip the learn cycle if the service was previously indexed |
 
 ### Deep Link Routing
 
@@ -1095,7 +1096,7 @@ sherlock/
 ├── Makefile                    # Development commands
 ├── .env.example                # Environment variable template
 ├── .gitignore
-├── main.py                     # MCP server entry point (23 tools)
+├── main.py                     # MCP server entry point (24 tools)
 ├── .github/
 │   ├── copilot-instructions.md # Agent-team rules, report format, anti-hallucination
 │   ├── agents/                 # 7 agent definitions
@@ -1146,7 +1147,7 @@ sherlock/
 │   └── dependencies.py         # Service dependency mapping
 ├── scripts/
 │   ├── validate_connection.py   # Interactive connection validator
-│   └── cli.py                  # Interactive CLI for all 23 tools
+│   └── cli.py                  # Interactive CLI for all 24 tools
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
 │   ├── test_alerts.py
@@ -1220,7 +1221,7 @@ make test-cov
 # Re-learn account topology (refresh intelligence cache)
 make relearn
 
-# Interactive CLI for all 23 tools
+# Interactive CLI for all 24 tools
 make cli
 
 # Clean __pycache__ directories

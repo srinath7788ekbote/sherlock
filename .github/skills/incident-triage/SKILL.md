@@ -36,8 +36,13 @@ description: >
 Before any domain investigation, complete these steps in order:
 
 ```
+STEP 0.0: mcp_sherlock_resolve_account(service_name)
+          → Check if the service's account is already known in persistent memory.
+          → If FOUND, use the returned profile_name in STEP 0.1.
+
 STEP 0.1: mcp_sherlock_connect_account()
           → Connect to the New Relic account. REQUIRED.
+          → Pass service_name param for auto-resolution if profile unknown.
 
 STEP 0.2: mcp_sherlock_learn_account()
           → Discovers ALL entity names, types, and relationships.

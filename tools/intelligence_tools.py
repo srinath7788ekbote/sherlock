@@ -44,6 +44,19 @@ async def _background_refresh(credentials: Credentials, account_id: str) -> None
             active_creds, _ = ctx.get_active()
             if active_creds.account_id == account_id:
                 ctx.set_active(credentials, intelligence)
+        # Update persistent account memory.
+        try:
+            from core.account_memory import AccountMemory
+            _acct_memory = AccountMemory()
+            _acct_memory.record_account_intelligence(
+                account_id=account_id,
+                account_name=intelligence.account_meta.name,
+                profile_name=_resolve_profile_name(account_id),
+                region=credentials.region,
+                intelligence=intelligence,
+            )
+        except Exception as mem_exc:
+            logger.warning("Failed to update account memory: %s", mem_exc)
         logger.info("Background cache refresh complete for account %s", account_id)
     except Exception as exc:
         logger.warning(
@@ -149,6 +162,7 @@ async def connect_account(
     api_key: str | None = None,
     region: str = "US",
     profile_name: str | None = None,
+    service_name: str | None = None,
 ) -> str:
     """Connect to a New Relic account and learn its structure.
 
@@ -163,12 +177,25 @@ async def connect_account(
         api_key: New Relic User API key (optional when profile_name given).
         region: 'US' or 'EU'.
         profile_name: Saved profile name to load credentials from keychain.
+        service_name: Optional service name to auto-resolve account from memory.
 
     Returns:
         JSON string with connection status and account summary.
     """
     start = time.time()
     try:
+        # ── Auto-resolve from account memory ─────────────────────────────
+        if service_name and not profile_name and not account_id:
+            from core.account_memory import AccountMemory
+            memory = AccountMemory()
+            entry = memory.lookup_service(service_name)
+            if entry and entry.profile_name:
+                profile_name = entry.profile_name
+                logger.info(
+                    "Auto-resolved service '%s' → profile '%s' (account %s) from memory",
+                    service_name, entry.profile_name, entry.account_id,
+                )
+
         # Resolve credentials from saved profile when explicit creds not given.
         if profile_name and (not account_id or not api_key):
             try:
@@ -235,6 +262,20 @@ async def connect_account(
             else:
                 intelligence = await learn_account(credentials)
                 _cache.set(account_id, intelligence.model_dump(mode="json"))
+
+        # Update persistent account memory.
+        try:
+            from core.account_memory import AccountMemory
+            _acct_memory = AccountMemory()
+            _acct_memory.record_account_intelligence(
+                account_id=account_id,
+                account_name=validation["account_name"],
+                profile_name=_resolve_profile_name(account_id) if not profile_name else profile_name,
+                region=region,
+                intelligence=intelligence,
+            )
+        except Exception as exc:
+            logger.warning("Failed to update account memory: %s", exc)
 
         # Set active context.
         ctx = AccountContext()
@@ -348,6 +389,20 @@ async def learn_account_tool() -> str:
         intelligence = await learn_account(credentials)
         _cache.set(credentials.account_id, intelligence.model_dump(mode="json"))
         ctx.set_active(credentials, intelligence)
+
+        # Update persistent account memory.
+        try:
+            from core.account_memory import AccountMemory
+            _acct_memory = AccountMemory()
+            _acct_memory.record_account_intelligence(
+                account_id=credentials.account_id,
+                account_name=intelligence.account_meta.name,
+                profile_name=_resolve_profile_name(credentials.account_id),
+                region=credentials.region,
+                intelligence=intelligence,
+            )
+        except Exception as exc:
+            logger.warning("Failed to update account memory: %s", exc)
 
         duration_ms = int((time.time() - start) * 1000)
 
@@ -565,6 +620,86 @@ async def list_profiles() -> str:
             "tool": "list_profiles",
             "hint": "Profile storage may not be initialized.",
             "data_available": False,
+        })
+
+
+def _resolve_profile_name(account_id: str) -> str:
+    """Find the profile name for an account_id from saved profiles."""
+    try:
+        profiles = _credential_manager.list_profiles()
+        for p in profiles:
+            if p.get("account_id") == account_id:
+                return p.get("name", "")
+    except Exception:
+        pass
+    return ""
+
+
+async def resolve_account(service_name: str) -> str:
+    """
+    Resolve which New Relic account a service belongs to.
+
+    Call this BEFORE connect_account when investigating a service.
+    If the service is found in memory, returns the profile_name and
+    account_id to connect directly — skipping the learn cycle.
+
+    If not found, returns a suggestion to connect and learn accounts.
+
+    Args:
+        service_name: The service, monitor, or entity name to look up.
+
+    Returns:
+        JSON with account mapping or not-found guidance.
+    """
+    from core.account_memory import AccountMemory
+
+    memory = AccountMemory()
+    entry = memory.lookup_service(service_name)
+
+    if entry and not memory.is_stale(service_name):
+        return json.dumps({
+            "status": "FOUND",
+            "service_name": service_name,
+            "account_id": entry.account_id,
+            "account_name": entry.account_name,
+            "profile_name": entry.profile_name,
+            "region": entry.region,
+            "last_seen": entry.last_seen.isoformat(),
+            "action": f"connect_account(profile_name=\"{entry.profile_name}\")",
+            "message": (
+                f"Service '{service_name}' was last seen in account "
+                f"'{entry.account_name}' ({entry.account_id}). "
+                f"Connect using profile '{entry.profile_name}' to skip learning."
+            ),
+        })
+    elif entry:
+        # Entry exists but is stale
+        return json.dumps({
+            "status": "STALE",
+            "service_name": service_name,
+            "account_id": entry.account_id,
+            "account_name": entry.account_name,
+            "profile_name": entry.profile_name,
+            "region": entry.region,
+            "last_seen": entry.last_seen.isoformat(),
+            "action": f"connect_account(profile_name=\"{entry.profile_name}\")",
+            "message": (
+                f"Service '{service_name}' was seen in account "
+                f"'{entry.account_name}' ({entry.account_id}) but the entry "
+                f"is stale. Connecting will trigger a fresh learn."
+            ),
+        })
+    else:
+        # Not found — list all known accounts for guidance
+        known = memory.get_all_accounts()
+        return json.dumps({
+            "status": "NOT_FOUND",
+            "service_name": service_name,
+            "known_accounts": known,
+            "message": (
+                f"Service '{service_name}' not found in account memory. "
+                f"Connect to each account to learn and index services."
+            ),
         })
 
 
