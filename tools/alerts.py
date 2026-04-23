@@ -94,10 +94,21 @@ async def get_alerts() -> str:
         )
 
         duration_ms = int((time.time() - start) * 1000)
+
+        # Top-level links for domain summary.
+        links: dict = {}
+        try:
+            _builder = _get_deeplink_builder()
+            if _builder:
+                links["alerts_page"] = _builder.alert_incident("", since_minutes=4320)
+        except Exception:
+            pass
+
         return json.dumps({
             "account_id": credentials.account_id,
             "total_policies": len(policies),
             "policies": policies,
+            "links": links,
             "duration_ms": duration_ms,
         })
 
@@ -156,11 +167,21 @@ async def get_incidents(state: str = "open") -> str:
             except Exception:
                 pass
 
+        # Top-level links for domain summary.
+        links: dict = {}
+        try:
+            _builder_top = _get_deeplink_builder()
+            if _builder_top:
+                links["alerts_page"] = _builder_top.alert_incident("", since_minutes=4320)
+        except Exception:
+            pass
+
         return json.dumps({
             "account_id": credentials.account_id,
             "state_filter": state,
             "total_incidents": len(incidents),
             "incidents": incidents,
+            "links": links,
             "duration_ms": duration_ms,
         })
 
@@ -228,10 +249,20 @@ async def get_service_incidents(service_name: str) -> str:
         except Exception:
             pass
 
+        # Top-level links for domain summary.
+        links: dict = {}
+        try:
+            _builder_top = _get_deeplink_builder()
+            if _builder_top:
+                links["alerts_page"] = _builder_top.alert_incident("", since_minutes=4320)
+        except Exception:
+            pass
+
         response: dict = {
             "service_name": resolved_name,
             "total_incidents": len(incidents),
             "incidents": incidents,
+            "links": links,
             "duration_ms": duration_ms,
         }
         if was_fuzzy:

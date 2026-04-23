@@ -11,7 +11,6 @@ import time
 
 from client.newrelic import get_client
 from core.context import AccountContext
-from core.deeplinks import get_builder as _get_deeplink_builder
 from core.sanitize import sanitize_nrql_string
 
 logger = logging.getLogger("sherlock.tools.nrql")
@@ -86,21 +85,22 @@ async def run_nrql_query(nrql: str) -> str:
         duration_ms = int((time.time() - start) * 1000)
         logger.info("NRQL executed in %dms, %d results", duration_ms, len(nrql_results))
 
-        # Generate deep link to open this query in New Relic Query Builder.
-        deep_link = None
-        try:
-            builder = _get_deeplink_builder()
-            if builder:
-                deep_link = builder.nrql_chart(nrql, since_minutes=60)
-        except Exception:
-            pass
+        # Note: NRQL query builder deep links were retired (NR redirects to
+        # Notebooks). The NRQL string is included below for copy-paste into
+        # the "Query your data" panel. Domain-specific tools (golden_signals,
+        # k8s, logs, alerts, synthetics) return proper entity-view links in
+        # their `links` dict — prefer those for deep links in reports.
 
         return json.dumps({
             "nrql": nrql,
             "account_id": credentials.account_id,
             "result_count": len(nrql_results),
             "results": nrql_results,
-            "open_in_new_relic": deep_link,
+            "open_in_new_relic": None,
+            "note": "Copy the NRQL query into the 'Query your data' panel in New Relic. "
+                    "For clickable deep links, use domain-specific tools "
+                    "(get_service_golden_signals, get_k8s_health, search_logs, "
+                    "get_incidents, get_monitor_status) which return verified links.",
             "warnings": warnings,
             "duration_ms": duration_ms,
         })

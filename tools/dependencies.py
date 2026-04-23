@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from core.context import AccountContext
+from core.deeplinks import get_builder as _get_deeplink_builder, resolve_apm_guid
 from core.dependency_graph import (
     DependencyGraph,
     get_dependencies,
@@ -228,6 +229,18 @@ async def get_service_dependencies(
         ]
         if svc_warnings:
             result["warnings"] = svc_warnings
+
+        # Deep links for domain summary.
+        try:
+            _builder = _get_deeplink_builder()
+            if _builder:
+                _guid = resolve_apm_guid(service_name, intelligence)
+                result["links"] = {
+                    "service_map": _builder.service_map(_guid) if _guid else None,
+                    "service_overview": _builder.apm_overview(_guid) if _guid else None,
+                }
+        except Exception:
+            pass
 
         result["data_available"] = True
         return json.dumps(result)

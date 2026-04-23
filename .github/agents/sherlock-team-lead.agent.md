@@ -603,16 +603,31 @@ report is still valid.
 ## ⛔ DEEP LINK RULE — MANDATORY
 
 Sherlock MCP tools return `deep_link` and `links` fields in their JSON responses.
-These are clickable New Relic URLs that take engineers directly to the relevant
-chart, entity, or query.
+These are clickable New Relic URLs built from **verified URL patterns** in
+`core/deeplinks.py`. They are the ONLY source of truth for NR deep links.
 
 **YOU MUST:**
-- Extract `links` dict from `get_service_golden_signals` response → include in APM section
-- Extract `links` from K8s agent → K8s section
-- For every NRQL query run via `run_nrql_query`, the agent SHOULD construct the
-  NR query builder URL: `https://one.newrelic.com/launcher/data-exploration.query-builder`
+- Extract `links` dict from every tool response and use those URLs verbatim
+- Use `links.service_overview` / `links.errors_inbox` from `get_service_golden_signals` → APM section
+- Use `links.k8s_explorer` / `links.workload_view` from `get_k8s_health` → K8s section
+- Use `links.view_in_nr` from `search_logs` → Logs section
+- Use `links.alerts_page` from `get_incidents` / `get_service_incidents` / `get_alerts` → Alerts section
+- Use `links.monitor` / `links.failed_results` from `get_monitor_status` → Synthetics section
+- Use `links.service_map` from `get_service_dependencies` → Infra section
+- Include `nrql` key values (the query string) in findings so engineers can copy-paste
 
-**Format:** `[View in New Relic](URL)` — clickable markdown link.
+**YOU MUST NOT:**
+- ⛔ **NEVER construct NR URLs manually** — not even partially. Always use `links` from tool responses.
+- ⛔ **NEVER use** `https://one.newrelic.com/launcher/data-exploration.query-builder` — this was retired.
+- ⛔ **NEVER use** `https://one.newrelic.com/launcher/logger.log-launcher` — wrong path.
+- ⛔ **NEVER invent URL paths** from training data — NR routing changes frequently.
+- ⛔ **NEVER strip params** (`account=`, `duration=`, `filters=`) from tool-returned URLs.
+
+**If a tool returns no `links` dict** (e.g. `run_nrql_query`), include the NRQL query
+string in a fenced `sql` code block so engineers can copy-paste into "Query your data".
+Do NOT fabricate a URL for it.
+
+**Format:** `[View in New Relic](URL)` — clickable markdown link, URL copied verbatim from tool response.
 
 ## Report Template — ENFORCEMENT RULES (READ BEFORE WRITING OUTPUT)
 

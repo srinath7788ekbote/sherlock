@@ -291,15 +291,16 @@ NO_DATA domains get one line in the status table only.
 Every finding in the detail sections MUST follow this pattern:
 
 1. **Deep link**: Each finding line ends with a clickable `[View …](url)` link
+   copied verbatim from the tool's `links` dict.
 2. **NRQL block**: If the finding was produced by a NRQL query, include the
    exact query in a fenced `sql` code block immediately below the finding line.
    This lets the engineer copy-paste the query into New Relic for further drill-down.
-3. **Link + NRQL together**: The deep link should open the NRQL chart in New Relic
-   with the query pre-loaded (using `nrql_chart()` / `spike_chart()`).
+3. **Link + NRQL together**: Use the entity-view deep link from the tool's `links`
+   dict. `nrql_chart()` and `spike_chart()` are retired — do NOT fabricate chart URLs.
 4. **Non-NRQL findings** (e.g., K8s pod status, dependency maps) get a deep link
-   but no NRQL block — the link points to the appropriate NR1 page instead.
-5. **Recommendations table**: Each row's Link column should be a `[View NRQL](url)`
-   that opens the relevant query in the query builder.
+   from the tool response — the link points to the appropriate NR1 page.
+5. **Recommendations table**: Each row's Link column should be a deep link from
+   the relevant tool's `links` dict, or the NRQL string if no link is available.
 
 ### Report Size Rules
 
@@ -405,23 +406,36 @@ often different from APM service names (e.g., `eswd-prod/sifi-adapter`).
 ### Deep Link Rule (MANDATORY)
 
 Sherlock MCP tools return `deep_link` and `links` fields in their JSON responses.
-These are clickable New Relic URLs. **Every finding MUST include its deep link.**
+These are clickable New Relic URLs built from **verified URL patterns** in
+`core/deeplinks.py`. **Every finding MUST include its deep link from the tool response.**
 
 | Tool | Link Field | Contains |
 |------|-----------|----------|
-| `get_service_golden_signals` | `links.service_overview`, `links.error_chart`, `links.latency_chart` | APM entity, error/latency NRQL charts |
-| `get_k8s_health` | — | K8s explorer link (build from account) |
-| `get_service_incidents` | `incidents[].deep_link` | Alert incident pages |
-| `run_nrql_query` | — | Agents should build: `https://one.newrelic.com/launcher/data-exploration.query-builder?...` |
+| `get_service_golden_signals` | `links.service_overview`, `links.errors_inbox`, `links.transactions` | APM entity views |
+| `get_k8s_health` | `links.k8s_explorer`, `links.workload_view` | K8s cluster/deployment views |
+| `search_logs` | `links.view_in_nr`, `links.error_logs` | Log UI with filters |
+| `get_incidents` / `get_service_incidents` | `links.alerts_page`, `incidents[].deep_link` | Alerts page + per-incident |
+| `get_alerts` | `links.alerts_page` | Alerts policies page |
+| `get_monitor_status` | `links.monitor`, `links.failed_results` | Synthetic monitor views |
+| `get_service_dependencies` | `links.service_map`, `links.service_overview` | Service map + APM overview |
+| `run_nrql_query` | `open_in_new_relic: null` | **No deep link available** — include NRQL string for copy-paste |
 
-**Format in report:** `[View in New Relic](URL)` — clickable markdown link.
+**⛔ NEVER construct NR URLs manually.** Always use `links` from tool responses.
+The NR query builder URL (`/launcher/data-exploration.query-builder`) was retired.
+Do not fabricate or modify tool-returned URLs.
+
+**Format in report:** `[View in New Relic](URL)` — clickable markdown link, URL copied verbatim from tool response.
+
+**When no link is available** (e.g. `run_nrql_query`): include the NRQL query in a
+fenced `sql` code block. Do NOT invent a URL.
 
 ### Source Citation Rules
 
 - **RULE SC-1**: Every finding MUST have at least one tool call citation
-- **RULE SC-2**: Every finding SHOULD have a deep link to New Relic
+- **RULE SC-2**: Every finding SHOULD have a deep link from the tool's `links` dict
 - **RULE SC-3**: A response with zero citations is INVALID
 - **RULE SC-4**: NO_DATA domains need no individual citations — status table is enough
+- **RULE SC-5**: When a finding comes from `run_nrql_query`, cite the NRQL string — do NOT fabricate a URL
 
 ---
 
@@ -658,3 +672,9 @@ Update CLAUDE_STATE.md in the repo root as the LAST step, after doc-sync.
 Recount from actual code (count @mcp.tool() decorators, count def test_ functions).
 Only update the fields that changed. Update the "Last updated" date.
 Do not rewrite sections that did not change.
+
+## graphify
+
+Before answering architecture or codebase questions, read `graphify-out/GRAPH_REPORT.md` if it exists.
+If `graphify-out/wiki/index.md` exists, navigate it for deep questions.
+Type `/graphify` in Copilot Chat to build or update the knowledge graph.
