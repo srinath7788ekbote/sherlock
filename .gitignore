@@ -36,6 +36,7 @@ cache/
 .sherlock/
 CLAUDE_STATE.md
 graphify-out/
+publish_sherlock_home.py
 
 # Keyring
 *.keyring
