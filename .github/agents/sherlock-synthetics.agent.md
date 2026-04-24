@@ -7,7 +7,12 @@ description: >
   Triggers: synthetic, monitor, health check, ping, scripted, availability,
   uptime, SLA, location, check failure, SSL, certificate, endpoint.
 tools:
-  - mcp_sherlock
+  - sherlock/get_synthetic_monitors
+  - sherlock/get_monitor_status
+  - sherlock/get_monitor_results
+  - sherlock/investigate_synthetic
+  - sherlock/run_nrql_query
+  - sherlock/get_nrql_context
 user-invocable: true
 handoffs:
   - label: "-> APM Agent (backend correlation)"

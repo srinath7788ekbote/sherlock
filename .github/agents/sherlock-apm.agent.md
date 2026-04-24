@@ -8,7 +8,12 @@ description: >
   deployment, apdex, web transaction, non-web, percentile, SLA, performance
   degradation, regression.
 tools:
-  - mcp_sherlock
+  - sherlock/get_service_golden_signals
+  - sherlock/get_app_metrics
+  - sherlock/get_deployments
+  - sherlock/get_apm_applications
+  - sherlock/run_nrql_query
+  - sherlock/get_nrql_context
 user-invocable: true
 handoffs:
   - label: "-> K8s Agent (resource pressure suspected)"

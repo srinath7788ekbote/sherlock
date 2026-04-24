@@ -8,7 +8,7 @@ description: >
   reliability question.
 tools:
   - agent
-  - mcp_sherlock
+  - sherlock/*
 agents:
   - sherlock-apm
   - sherlock-k8s

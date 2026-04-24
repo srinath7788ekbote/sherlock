@@ -8,7 +8,11 @@ description: >
   notification, open incident, critical, warning, muting, NRQL condition,
   baseline alert, anomaly detection.
 tools:
-  - mcp_sherlock
+  - sherlock/get_service_incidents
+  - sherlock/get_incidents
+  - sherlock/get_alerts
+  - sherlock/run_nrql_query
+  - sherlock/get_nrql_context
 user-invocable: true
 handoffs:
   - label: "-> APM Agent (investigate alerted service)"

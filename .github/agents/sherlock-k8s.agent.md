@@ -9,7 +9,9 @@ description: >
   CPU throttling, memory pressure, eviction, PVC, volume, daemonset,
   statefulset, namespace.
 tools:
-  - mcp_sherlock
+  - sherlock/get_k8s_health
+  - sherlock/run_nrql_query
+  - sherlock/get_nrql_context
 user-invocable: true
 handoffs:
   - label: "-> APM Agent (app-level correlation)"

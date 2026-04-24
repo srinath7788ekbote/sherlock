@@ -8,7 +8,9 @@ description: >
   fatal, message, log pattern, error spike, log search, severity, level,
   trace, debug.
 tools:
-  - mcp_sherlock
+  - sherlock/search_logs
+  - sherlock/run_nrql_query
+  - sherlock/get_nrql_context
 user-invocable: true
 handoffs:
   - label: "-> APM Agent (correlate with transactions)"

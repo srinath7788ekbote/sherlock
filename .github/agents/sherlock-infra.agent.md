@@ -8,7 +8,9 @@ description: >
   external service, database, browser, page load, ajax, infrastructure,
   connection, timeout, queue, messaging, kafka, rabbitmq.
 tools:
-  - mcp_sherlock
+  - sherlock/get_service_dependencies
+  - sherlock/run_nrql_query
+  - sherlock/get_nrql_context
 user-invocable: true
 handoffs:
   - label: "-> APM Agent (app-level correlation)"
