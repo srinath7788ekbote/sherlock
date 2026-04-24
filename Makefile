@@ -1,4 +1,4 @@
-.PHONY: install run test test-fast test-synthetics test-dependencies test-deeplinks test-domain-tools test-session-memory test-structured-output test-frustration test-asb test-cov lint format logs audit connect relearn cli clean
+.PHONY: install run test test-fast test-synthetics test-dependencies test-deeplinks test-domain-tools test-session-memory test-structured-output test-frustration test-asb test-cov lint format logs audit connect relearn relearn-all relearn-list cli clean
 
 install:
 	pip install -e ".[dev]"
@@ -55,7 +55,17 @@ connect:
 	python scripts/validate_connection.py
 
 relearn:
-	python scripts/cli.py --profile DFIN_AD --tool learn_account
+ifdef PROFILE
+	python scripts/relearn.py --profile $(PROFILE)
+else
+	python scripts/relearn.py
+endif
+
+relearn-all:
+	python scripts/relearn.py
+
+relearn-list:
+	python scripts/relearn.py --list
 
 cli:
 	python scripts/cli.py $(ARGS)

@@ -20,14 +20,14 @@ description: >
 | # | Rule |
 |---|------|
 | T-1 | **ALWAYS connect first** — `mcp_sherlock_connect_account` before anything |
-| T-2 | **ALWAYS learn the account** — `mcp_sherlock_learn_account` to discover real entity names |
+| T-2 | **ALWAYS learn the account** — `mcp_sherlock_learn_account` ONLY when `connect_account` returns `skip_learn_account: false` |
 | T-3 | **ALL six domains MUST be checked** — APM, K8s, Logs, Alerts, Synthetics, Infra |
 | T-4 | **NEVER skip a domain** — NO_DATA is valuable signal, not a reason to skip |
 | T-5 | **ALWAYS correlate timing** across domains (deploy → error spike → K8s restarts) |
 | T-6 | **ALWAYS check dependencies** — is this service the origin or a downstream victim? |
 | T-7 | **ALWAYS provide remediation** — prioritized fix recommendations for every finding |
 | T-8 | **NEVER answer from training data** when Sherlock tools have results |
-| T-9 | **ALWAYS parse K8s names** — bare name (after `/`) for deploymentName, prefix (before `/`) for namespace |
+| T-9 | **ALWAYS parse K8s names** — bare name (after `/`) for deploymentName. DO NOT use APM prefix as K8s namespace — tools resolve it via NamingConvention |
 
 ---
 
@@ -39,27 +39,41 @@ Before any domain investigation, complete these steps in order:
 STEP 0.0: mcp_sherlock_resolve_account(service_name)
           → Check if the service's account is already known in persistent memory.
           → If FOUND, use the returned profile_name in STEP 0.1.
+          → If FOUND and naming_convention is returned, note the
+            apm_to_k8s_namespace_map for namespace resolution.
 
 STEP 0.1: mcp_sherlock_connect_account()
           → Connect to the New Relic account. REQUIRED.
           → Pass service_name param for auto-resolution if profile unknown.
+          → If connect_account returns skip_learn_account: true,
+            DO NOT call learn_account — proceed directly to STEP 0.3.
 
-STEP 0.2: mcp_sherlock_learn_account()
-          → Discovers ALL entity names, types, and relationships.
-          → This tells you the REAL service names, K8s deployment names, etc.
-          → Use these real names in all subsequent queries.
+STEP 0.2: mcp_sherlock_learn_account() — ONLY if:
+          - connect_account returned intelligence_source: "fresh_learn" AND
+            the response was an error, OR
+          - You explicitly need to force-refresh entity discovery
+            (pass force=True to bypass the server-side cache guardrail).
+          → In normal flow, this step is SKIPPED when connect_account
+            already loaded intelligence from cache.
+          → Server-side guardrail: even if called redundantly with
+            force=False (default), the tool returns already_learned
+            immediately without re-querying NR.
 
 STEP 0.3: Parse the service name:
           → "eswd-prod/sifi-adapter" → full="eswd-prod/sifi-adapter",
-            bare="sifi-adapter", namespace="eswd-prod"
-          → "my-service" → full="my-service", bare="my-service", namespace=None
+            bare="sifi-adapter"
+          → "my-service" → full="my-service", bare="my-service"
+          → DO NOT manually extract namespace from the APM prefix.
+            The K8s tool resolves it automatically via NamingConvention.
+            Server-side guardrail: even if a wrong namespace is passed,
+            the tool overrides it with the NamingConvention mapping.
 
-STEP 0.4: mcp_sherlock_get_nrql_context(domain="all")
+STEP 0.4: mcp_sherlock_get_nrql_context(domain="all") — OPTIONAL
           → Get real attribute names for NRQL queries.
-          → Pass to agents so they use correct WHERE clauses.
+          → Can be skipped for speed if intelligence is already cached.
 ```
 
-**NEVER skip Steps 0.1–0.3.**
+**NEVER skip Steps 0.0–0.1.**
 
 ---
 
@@ -92,7 +106,9 @@ STEP 4: NRQL for error breakdown: SELECT count(*) FROM TransactionError FACET er
 ### 2.2 K8s Domain (sherlock-k8s)
 
 **⛔ CRITICAL: Parse the APM service name first.**
-Given `eswd-prod/sifi-adapter` → bare_name=`sifi-adapter`, namespace=`eswd-prod`.
+Given `eswd-prod/sifi-adapter` → bare_name=`sifi-adapter`.
+DO NOT manually extract namespace from the APM prefix — the K8s tool resolves it
+automatically via `NamingConvention.apm_to_k8s_namespace_map`.
 Pass the BARE name to K8s queries, NOT the full APM name.
 
 **Cluster Checklist (multi-cluster accounts):**
@@ -101,7 +117,8 @@ Pass the BARE name to K8s queries, NOT the full APM name.
 - [ ] NEVER report aggregated K8s status across clusters — always report per-cluster.
 
 ```
-STEP 1: mcp_sherlock_get_k8s_health(service_name="{bare_name}", namespace="{namespace}", since_minutes=60)
+STEP 1: mcp_sherlock_get_k8s_health(service_name="{bare_name}", since_minutes=60)
+        DO NOT pass namespace — the tool resolves it from NamingConvention.
 STEP 2: If no data → NRQL fallback:
         SELECT latest(status), sum(restartCount) FROM K8sPodSample
         WHERE deploymentName LIKE '%{bare_name}%' FACET podName SINCE {window} minutes ago
@@ -113,7 +130,7 @@ STEP 4: If no data → Try label.app:
         WHERE `label.app` LIKE '%{bare_name}%' FACET podName SINCE {window} minutes ago
 STEP 5: NRQL K8s events:
         SELECT * FROM InfrastructureEvent WHERE category = 'kubernetes'
-        AND (involvedObjectName LIKE '%{bare_name}%' OR involvedObjectNamespace = '{namespace}')
+        AND involvedObjectName LIKE '%{bare_name}%'
         SINCE {window} minutes ago LIMIT 50
 ```
 

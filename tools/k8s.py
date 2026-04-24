@@ -149,26 +149,18 @@ async def get_k8s_health(
             })
 
         # Resolve namespace.
-        resolved_ns = namespace
+        # Server-side guardrail: when service_name is provided and
+        # NamingConvention has an apm_to_k8s_namespace_map, derive the
+        # correct K8s namespace from the service name regardless of what
+        # the client passed as ``namespace``.  This prevents naive clients
+        # from sending the APM env prefix (e.g. "eswd-prod") as a K8s
+        # namespace when the real namespace is different (e.g. "eswd").
+        resolved_ns = None
         was_fuzzy_ns = False
-        if namespace:
-            safe_ns = sanitize_service_name(namespace)
-            try:
-                resolved_ns, was_fuzzy_ns, _ = fuzzy_resolve_service(
-                    safe_ns, intelligence.k8s.namespaces, threshold=0.5
-                )
-            except Exception:
-                resolved_ns = safe_ns
-        elif service_name:
+        nc_mapped_ns = None
+
+        if service_name:
             safe_name = sanitize_service_name(service_name)
-            try:
-                _, _, _ = fuzzy_resolve_service(
-                    safe_name, intelligence.apm.service_names, threshold=0.5,
-                    naming_convention=intelligence.naming_convention,
-                )
-            except Exception:
-                pass
-            # Use naming convention to map APM env segment to K8s namespace.
             nc = intelligence.naming_convention
             if nc.separator and nc.env_position and nc.apm_to_k8s_namespace_map:
                 sep = nc.separator
@@ -177,9 +169,29 @@ async def get_k8s_health(
                         env_segment = safe_name.split(sep, 1)[0]
                     else:
                         env_segment = safe_name.rsplit(sep, 1)[-1]
-                    mapped_ns = nc.apm_to_k8s_namespace_map.get(env_segment)
-                    if mapped_ns:
-                        resolved_ns = mapped_ns
+                    nc_mapped_ns = nc.apm_to_k8s_namespace_map.get(env_segment)
+
+        if nc_mapped_ns:
+            # NamingConvention mapping wins — even over client-provided namespace.
+            resolved_ns = nc_mapped_ns
+        elif namespace:
+            safe_ns = sanitize_service_name(namespace)
+            try:
+                resolved_ns, was_fuzzy_ns, _ = fuzzy_resolve_service(
+                    safe_ns, intelligence.k8s.namespaces, threshold=0.5
+                )
+            except Exception:
+                resolved_ns = safe_ns
+        elif service_name:
+            # No mapping found and no namespace provided — try fuzzy resolve.
+            safe_name = sanitize_service_name(service_name)
+            try:
+                _, _, _ = fuzzy_resolve_service(
+                    safe_name, intelligence.apm.service_names, threshold=0.5,
+                    naming_convention=intelligence.naming_convention,
+                )
+            except Exception:
+                pass
             if not resolved_ns and intelligence.k8s.namespaces:
                 resolved_ns = intelligence.k8s.namespaces[0]
 
@@ -208,11 +220,24 @@ async def get_k8s_health(
                 resolved_svc = safe_name
 
         # Run direct NRQL queries for K8s health.
-        return await _k8s_health_queries(
+        result_json = await _k8s_health_queries(
                 resolved_ns, resolved_svc, service_name, namespace,
                 since_minutes, was_fuzzy_ns, was_fuzzy_svc,
                 credentials, intelligence, start, cluster_name,
             )
+
+        # Annotate when NamingConvention overrode a client-provided namespace.
+        if nc_mapped_ns and namespace and namespace != nc_mapped_ns:
+            result = json.loads(result_json)
+            result["namespace_override_applied"] = True
+            result["namespace_client_provided"] = namespace
+            result["namespace_override_reason"] = (
+                f"Client passed namespace='{namespace}' but NamingConvention "
+                f"mapped the service to '{nc_mapped_ns}'. Using mapped value."
+            )
+            result_json = json.dumps(result)
+
+        return result_json
 
     except Exception as exc:
         return json.dumps({

@@ -10,6 +10,7 @@ import pytest
 import respx
 
 from core.context import AccountContext
+from core.intelligence import NamingConvention
 from tools.k8s import get_k8s_health
 
 
@@ -155,3 +156,103 @@ class TestGetK8sHealth:
         # Function returns empty data on API errors (graceful degradation).
         assert parsed["pods"] == []
         assert parsed["container_restarts"] == []
+
+
+class TestK8sNamespaceOverrideGuardrail:
+    """Tests for server-side namespace override when NamingConvention has a mapping."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_naming_convention_overrides_client_namespace(
+        self, mock_credentials, mock_intelligence, mock_context
+    ):
+        """When NamingConvention maps service→namespace, client-provided namespace is overridden."""
+        # Set up naming convention with mapping: eswd-prod → eswd
+        mock_intelligence.naming_convention = NamingConvention(
+            separator="/",
+            env_position="prefix",
+            apm_to_k8s_namespace_map={"eswd-prod": "eswd"},
+            k8s_deployment_name_format="bare",
+        )
+        mock_context.set_active(mock_credentials, mock_intelligence)
+
+        empty = _mock_nrql_response([])
+        respx.post("https://api.newrelic.com/graphql").mock(
+            side_effect=[
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+            ]
+        )
+
+        # Client passes wrong namespace "eswd-prod" but NamingConvention knows it's "eswd"
+        result = await get_k8s_health(
+            service_name="eswd-prod/sifi-adapter",
+            namespace="eswd-prod",
+        )
+        parsed = json.loads(result)
+
+        assert parsed["namespace"] == "eswd"
+        assert parsed["namespace_override_applied"] is True
+        assert parsed["namespace_client_provided"] == "eswd-prod"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_override_when_mapping_matches_client(
+        self, mock_credentials, mock_intelligence, mock_context
+    ):
+        """No override annotation when client namespace matches the mapped value."""
+        mock_intelligence.naming_convention = NamingConvention(
+            separator="/",
+            env_position="prefix",
+            apm_to_k8s_namespace_map={"eswd-prod": "eswd"},
+            k8s_deployment_name_format="bare",
+        )
+        mock_context.set_active(mock_credentials, mock_intelligence)
+
+        empty = _mock_nrql_response([])
+        respx.post("https://api.newrelic.com/graphql").mock(
+            side_effect=[
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+            ]
+        )
+
+        # Client passes the correct namespace already
+        result = await get_k8s_health(
+            service_name="eswd-prod/sifi-adapter",
+            namespace="eswd",
+        )
+        parsed = json.loads(result)
+
+        assert parsed["namespace"] == "eswd"
+        assert "namespace_override_applied" not in parsed
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_client_namespace_used_when_no_mapping(
+        self, mock_credentials, mock_intelligence, mock_context
+    ):
+        """Client-provided namespace is used when no NamingConvention mapping exists."""
+        # Default NamingConvention has empty apm_to_k8s_namespace_map
+        empty = _mock_nrql_response([])
+        respx.post("https://api.newrelic.com/graphql").mock(
+            side_effect=[
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+                httpx.Response(200, json=empty),
+            ]
+        )
+
+        result = await get_k8s_health(
+            service_name="web-api",
+            namespace="payments-prod",
+        )
+        parsed = json.loads(result)
+
+        assert parsed["namespace"] == "payments-prod"
+        assert "namespace_override_applied" not in parsed

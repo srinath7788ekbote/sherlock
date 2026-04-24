@@ -457,34 +457,35 @@ python scripts/cli.py
 
 ***
 
-## Available Tools (23)
+## Available Tools (24)
 
-### Connection & Intelligence (8 tools)
+### Connection & Intelligence (9 tools)
 
 | # | Tool                      | Description                                                                                                    |
 | - | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| 1 | `connect_account`         | Connect to a New Relic account by profile name or credentials                                                  |
-| 2 | `list_profiles`           | List all saved credential profiles                                                                             |
-| 3 | `learn_account`           | Re-discover account topology (APM, OTel, K8s, synthetics, alerts, etc.)                                        |
-| 4 | `get_account_summary`     | Return a summary of discovered assets (APM, OTel, infra, browser, mobile, workloads)                           |
-| 5 | `get_session_context`     | Return investigation history from the current session for follow-up questions                                  |
-| 6 | `get_frustration_context` | Detect frustration/retry loops — combines language signals with session retry count to trigger escalation mode |
-| 7 | `get_structured_report`   | Return the most recent investigation as machine-readable structured JSON (full, summary, or metrics format)    |
-| 8 | `get_nrql_context`        | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.)                                    |
+| 1 | `connect_account`         | Connect to a New Relic account by profile name or credentials. Returns `intelligence_source`, `skip_learn_account`, and `naming_convention` |
+| 2 | `resolve_account`         | Resolve which account owns a service — call BEFORE connect_account to skip the learn cycle if previously indexed |
+| 3 | `list_profiles`           | List all saved credential profiles                                                                             |
+| 4 | `learn_account`           | Re-discover account topology. Has a server-side cache guardrail: `force=False` (default) returns `already_learned` immediately when cached. Pass `force=True` to bypass cache and do a full re-learn |
+| 5 | `get_account_summary`     | Return a summary of discovered assets (APM, OTel, infra, browser, mobile, workloads)                           |
+| 6 | `get_session_context`     | Return investigation history from the current session for follow-up questions                                  |
+| 7 | `get_frustration_context` | Detect frustration/retry loops — combines language signals with session retry count to trigger escalation mode |
+| 8 | `get_structured_report`   | Return the most recent investigation as machine-readable structured JSON (full, summary, or metrics format)    |
+| 9 | `get_nrql_context`        | Get NRQL query templates for a specific domain (apm, k8s, synthetics, etc.)                                    |
 
 ### Query (1 tool)
 
-| # | Tool             | Description                                                            |
-| - | ---------------- | ---------------------------------------------------------------------- |
-| 9 | `run_nrql_query` | Execute any read-only NRQL query (includes deep link to Query Builder) |
+| #  | Tool             | Description                                                            |
+| -- | ---------------- | ---------------------------------------------------------------------- |
+| 10 | `run_nrql_query` | Execute any read-only NRQL query (includes deep link to Query Builder) |
 
 ### APM & Performance (3 tools)
 
 | #  | Tool                   | Description                                |
 | -- | ---------------------- | ------------------------------------------ |
-| 10 | `get_apm_applications` | List all APM-instrumented applications     |
-| 11 | `get_app_metrics`      | Get key metrics for a specific application |
-| 12 | `get_deployments`      | List recent deployments for an application |
+| 11 | `get_apm_applications` | List all APM-instrumented applications     |
+| 12 | `get_app_metrics`      | Get key metrics for a specific application |
+| 13 | `get_deployments`      | List recent deployments for an application |
 
 #### APM Entity Disambiguation
 
@@ -504,15 +505,15 @@ GUID) remain available as unambiguous evidence.
 
 | #  | Tool                    | Description                                                         |
 | -- | ----------------------- | ------------------------------------------------------------------- |
-| 13 | `get_alerts`            | List alert policies and their conditions                            |
-| 14 | `get_incidents`         | List incidents filtered by state (open/closed), includes deep links |
-| 15 | `get_service_incidents` | Get incidents for a specific service (fuzzy name resolution)        |
+| 14 | `get_alerts`            | List alert policies and their conditions                            |
+| 15 | `get_incidents`         | List incidents filtered by state (open/closed), includes deep links |
+| 16 | `get_service_incidents` | Get incidents for a specific service (fuzzy name resolution)        |
 
 ### Infrastructure & Kubernetes (1 tool)
 
 | #  | Tool             | Description                                                                |
 | -- | ---------------- | -------------------------------------------------------------------------- |
-| 16 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events (with deep links) |
+| 17 | `get_k8s_health` | Get K8s cluster health — pods, nodes, containers, events (with deep links). Namespace auto-resolved via NamingConvention; server-side guardrail overrides wrong client-provided namespace |
 
 #### Multi-Cluster K8s Awareness
 
@@ -536,29 +537,28 @@ Response shape additions:
 
 | #  | Tool          | Description                                            |
 | -- | ------------- | ------------------------------------------------------ |
-| 17 | `search_logs` | Search logs by service, severity, keyword, time window |
+| 18 | `search_logs` | Search logs by service, severity, keyword, time window |
 
 ### Golden Signals (1 tool)
 
 | #  | Tool                         | Description                                            |
 | -- | ---------------------------- | ------------------------------------------------------ |
-| 18 | `get_service_golden_signals` | Get latency, errors, traffic, saturation for a service |
+| 19 | `get_service_golden_signals` | Get latency, errors, traffic, saturation for a service |
 
 ### Synthetics (4 tools)
 
 | #  | Tool                     | Description                                                             |
 | -- | ------------------------ | ----------------------------------------------------------------------- |
-| 19 | `get_synthetic_monitors` | List all synthetic monitors with metadata                               |
-| 20 | `get_monitor_status`     | Deep health check — per-location success rates, diagnosis codes         |
-| 21 | `get_monitor_results`    | Get recent check results for a monitor                                  |
-| 22 | `investigate_synthetic`  | Full investigation — monitor health + APM correlation + recommendations |
+| 20 | `get_synthetic_monitors` | List all synthetic monitors with metadata                               |
+| 21 | `get_monitor_status`     | Deep health check — per-location success rates, diagnosis codes         |
+| 22 | `get_monitor_results`    | Get recent check results for a monitor                                  |
+| 23 | `investigate_synthetic`  | Full investigation — monitor health + APM correlation + recommendations |
 
 ### Service Dependencies (1 tool)
 
 | #  | Tool                       | Description                                                                                                                     |
 | -- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 23 | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
-| 24 | `resolve_account`          | Resolve which New Relic account a service belongs to — call before connect_account to skip the learn cycle if the service was previously indexed |
+| 24 | `get_service_dependencies` | Get upstream and downstream service dependencies with call counts, error rates, latency, confidence scores, and health warnings |
 
 ### Deep Link Routing
 
@@ -627,7 +627,8 @@ User: "Why is the Login Flow monitor failing?"
 User: "Switch to the staging account"
 → Copilot calls: connect_account("staging")
 → Loads credentials from OS keychain
-→ Runs learn_account to discover staging topology
+→ If intelligence is cached, skips learn_account (skip_learn_account: true)
+→ If fresh account, runs learn_account to discover staging topology
 → All subsequent queries target staging
 ```
 
@@ -1147,7 +1148,8 @@ sherlock/
 │   └── dependencies.py         # Service dependency mapping
 ├── scripts/
 │   ├── validate_connection.py   # Interactive connection validator
-│   └── cli.py                  # Interactive CLI for all 24 tools
+│   ├── cli.py                  # Interactive CLI for all 24 tools
+│   └── relearn.py              # Force re-learn script for profiles
 ├── tests/
 │   ├── conftest.py             # Shared fixtures
 │   ├── test_alerts.py
@@ -1219,7 +1221,9 @@ make test-cov
 
 ```Shell
 # Re-learn account topology (refresh intelligence cache)
-make relearn
+make relearn                     # All profiles
+make relearn PROFILE=my-profile  # Single profile
+make relearn-list                # List available profiles
 
 # Interactive CLI for all 24 tools
 make cli
@@ -1292,8 +1296,9 @@ ls ~/.sherlock/logs/
 ls ~/.sherlock/cache/
 
 # Force re-learn (clears cache for active account)
-# In Copilot Chat: "re-learn the account"
-# → calls learn_account tool
+# In Copilot Chat: "re-learn the account" (calls learn_account with force=True)
+# From command line: make relearn PROFILE=my-profile
+# Or: python scripts/relearn.py --profile my-profile
 ```
 
 ***

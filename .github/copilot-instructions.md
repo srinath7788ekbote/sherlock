@@ -143,7 +143,7 @@ All tools are exposed via the Sherlock MCP server. Call them directly by name.
 
 | Tool | Purpose |
 |------|---------|| `mcp_sherlock_resolve_account` | Look up which account owns a service — call BEFORE connect to skip learning || `mcp_sherlock_connect_account` | Connect to NR account — **REQUIRED before all others** |
-| `mcp_sherlock_learn_account` | Discover ALL entity names, types, relationships — **REQUIRED for investigations** |
+| `mcp_sherlock_learn_account` | Discover ALL entity names, types, relationships. Has a **server-side cache guardrail**: when called without `force=True` and intelligence is already cached, it returns `already_learned` immediately without re-querying NR. Pass `force=True` to bypass cache and do a full re-learn. |
 | `mcp_sherlock_list_profiles` | List saved credential profiles |
 | `mcp_sherlock_get_account_summary` | Full account intelligence summary |
 | `mcp_sherlock_get_nrql_context` | Get real names before building NRQL |
@@ -152,16 +152,35 @@ All tools are exposed via the Sherlock MCP server. Call them directly by name.
 
 ```
 Step 0: mcp_sherlock_resolve_account(service)  ← check if service’s account is known
+        If FOUND, note the naming_convention (apm_to_k8s_namespace_map).
 Step 1: mcp_sherlock_connect_account()        ← connect (use profile from Step 0 if found)
-Step 2: mcp_sherlock_learn_account()           ← discover real entity names
-Step 3: Parse service name → full/bare/ns      ← name resolution
+        Response includes intelligence_source and skip_learn_account fields.
+Step 2: mcp_sherlock_learn_account()           ← ONLY if skip_learn_account is false
+        When connect_account returns skip_learn_account: true, SKIP this step.
+        Intelligence is already loaded from cache — proceed to Step 3.
+Step 3: Parse service name → full/bare          ← name resolution
+        DO NOT manually extract namespace from APM prefix for K8s tools.
+        The K8s tool resolves namespace automatically via NamingConvention.
 Step 4: mcp_sherlock_get_nrql_context("all")  ← optional, for NRQL attribute names
 Step 5: Dispatch domain agents                 ← with context envelope
 ```
 
-**NEVER skip Steps 1-3.** `learn_account` returns the real service names, K8s
-deployment names, and entity relationships as they exist in New Relic. Without
-this, agents may use wrong names in their queries.
+**NEVER skip Steps 0-1.** Step 2 is only needed when `connect_account` returns
+`skip_learn_account: false` (fresh learn). When intelligence is cached or stale,
+`connect_account` already loads it — calling `learn_account` again is wasteful.
+
+> **Server-side guardrail:** Even if a client calls `learn_account` redundantly,
+> the tool has a built-in cache check. When `force=False` (default) and intelligence
+> is already cached, it returns `{"status": "already_learned"}` immediately without
+> hitting New Relic. This makes the protocol safe with ANY MCP client.
+> To force a full re-learn (e.g., after infrastructure changes), pass `force=True`
+> or use `make relearn` from the command line.
+
+The `connect_account` response now includes:
+- `intelligence_source`: `"cached"` | `"stale_with_bg_refresh"` | `"fresh_learn"`
+- `skip_learn_account`: `true` when intelligence is already loaded from cache
+- `naming_convention`: separator, env_position, env_values, apm_to_k8s_namespace_map,
+  k8s_deployment_name_format, segment_roles
 
 ### Domain-Specific Tools (used by specialist agents)
 
@@ -385,17 +404,17 @@ often different from APM service names (e.g., `eswd-prod/sifi-adapter`).
 | APM Name | K8s Attribute | Value |
 |----------|---------------|-------|
 | `eswd-prod/sifi-adapter` | `deploymentName` | `sifi-adapter` |
-| `eswd-prod/sifi-adapter` | `namespaceName` | `eswd-prod` |
+| `eswd-prod/sifi-adapter` | `namespaceName` | Resolved via `NamingConvention.apm_to_k8s_namespace_map` (NOT `eswd-prod`) |
 | `eswd-prod/sifi-adapter` | `label.app` | `sifi-adapter` |
 | `eswd-prod/sifi-adapter` | `podName` | `sifi-adapter-*` |
 
 ### K8s Query Strategy (5-step fallback)
 
-1. `get_k8s_health(service_name="{bare_name}", namespace="{namespace}")`
+1. `get_k8s_health(service_name="{bare_name}")` — DO NOT pass namespace; the tool resolves it from NamingConvention. **Server-side guardrail:** even if a client passes a wrong namespace, the tool overrides it with the NamingConvention mapping when available (response includes `namespace_override_applied: true`)
 2. NRQL: `WHERE deploymentName LIKE '%{bare_name}%'`
 3. NRQL: `WHERE podName LIKE '%{bare_name}%'`
 4. NRQL: `` WHERE `label.app` LIKE '%{bare_name}%' ``
-5. NRQL: `WHERE namespaceName = '{namespace}'` (broader)
+5. NRQL: `WHERE namespaceName = '{namespace}'` (broader — only if you know the real K8s namespace)
 
 **The K8s agent MUST try all 5 before reporting NO_DATA.**
 

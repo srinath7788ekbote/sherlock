@@ -45,18 +45,21 @@ Given an APM service name like `eswd-prod/sifi-adapter`:
 |---------|-------|---------|
 | Full APM name | `eswd-prod/sifi-adapter` | APM tools only |
 | Bare name (after `/`) | `sifi-adapter` | `deploymentName`, `podName`, `containerName`, `label.app` |
-| Namespace (before `/`) | `eswd-prod` | `namespaceName` |
+
+**DO NOT manually extract namespace from the APM prefix.** The APM prefix (e.g. `eswd-prod`)
+is NOT the K8s namespace. The `get_k8s_health` tool uses `NamingConvention.apm_to_k8s_namespace_map`
+to resolve the real K8s namespace automatically when called with just `service_name`.
 
 If the service name has NO `/`, use the full name as bare name.
 
 ### Mandatory Query Strategy
 
 **ALWAYS try queries in this order:**
-1. `get_k8s_health(service_name="{bare_name}", namespace="{namespace}")` — dedicated tool
+1. `get_k8s_health(service_name="{bare_name}")` — dedicated tool, DO NOT pass `namespace` unless you know the exact K8s namespace (not the APM env prefix). The tool resolves it from NamingConvention. **Server-side guardrail:** even if a client passes a wrong namespace, the tool overrides it with the NamingConvention mapping when available (response includes `namespace_override_applied: true`).
 2. If no data: NRQL with `deploymentName LIKE '%{bare_name}%'`
 3. If no data: NRQL with `podName LIKE '%{bare_name}%'`
 4. If no data: NRQL with `` `label.app` LIKE '%{bare_name}%' ``
-5. If no data: NRQL with `namespaceName = '{namespace}'` (broader — all pods in namespace)
+5. If no data: NRQL with `namespaceName = '{namespace}'` (broader — all pods in namespace, only if you know the real K8s namespace)
 
 **NEVER stop after one failed query. Try ALL 5 before reporting NO_DATA.**
 
@@ -92,8 +95,12 @@ Use these ACTUAL names in your queries, not guesses.
 ### Step 1 — K8s Health Overview (dedicated tool)
 
 ```
-mcp_sherlock_get_k8s_health(service_name="{bare_name}", namespace="{namespace}", since_minutes={window})
+mcp_sherlock_get_k8s_health(service_name="{bare_name}", since_minutes={window})
 ```
+
+When calling `get_k8s_health`, pass `service_name` (the bare name after `/`) and let the
+tool resolve the K8s namespace from the account's `NamingConvention`. Do NOT pass
+`namespace` unless you know the exact K8s namespace name (not the APM env prefix).
 
 This is the fastest path. If it returns data, proceed to Step 3.
 If it returns no data, proceed to Step 2.
@@ -196,7 +203,7 @@ SINCE 30 minutes ago
 
 | Tool | When |
 |------|------|
-| `mcp_sherlock_get_k8s_health` | FIRST — always start here (with bare name + namespace) |
+| `mcp_sherlock_get_k8s_health` | FIRST — always start here (with bare name, no explicit namespace) |
 | `mcp_sherlock_run_nrql_query` | Fallback + deep NRQL for specific K8s event types |
 | `mcp_sherlock_get_nrql_context` | Get real namespace/deployment names if name resolution fails |
 

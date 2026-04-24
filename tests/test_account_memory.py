@@ -688,7 +688,8 @@ class TestLearnAccountMemoryIntegration:
         ctx.set_active(creds, intel)
 
         with patch("tools.intelligence_tools.learn_account", return_value=intel):
-            with patch("tools.intelligence_tools._cache"):
+            with patch("tools.intelligence_tools._cache") as mock_cache:
+                mock_cache.get.return_value = None  # No cache → full learn path
                 result = json.loads(await learn_account_tool())
 
         assert result.get("status") == "refreshed"
@@ -722,3 +723,58 @@ class TestLearnAccountMemoryIntegration:
 
         ctx.clear()
         AccountContext.reset_singleton()
+
+
+# ── resolve_account Naming Convention Tests ─────────────────────────────
+
+
+class TestResolveAccountNamingConvention:
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        """Pre-populate memory for naming convention tests."""
+        mem = AccountMemory()
+        intel = _make_intelligence(apm_names=["eswd-prod/pdf-export-service"])
+        mem.record_account_intelligence(
+            "3007677", "DFIN ActiveDisclosure", "DFIN_AD", "US", intel,
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_returns_naming_convention_when_cached(self):
+        """resolve_account includes naming_convention when intelligence is cached."""
+        from tools.intelligence_tools import resolve_account, _cache
+
+        # Put a cached intelligence entry with naming convention data
+        cached_data = _make_intelligence(
+            apm_names=["eswd-prod/pdf-export-service"],
+        ).model_dump(mode="json")
+        cached_data["naming_convention"] = {
+            "separator": "/",
+            "env_position": "prefix",
+            "apm_to_k8s_namespace_map": {"eswd-prod": "prod"},
+            "k8s_deployment_name_format": "bare",
+        }
+
+        with patch.object(_cache, "get", return_value=cached_data):
+            result = json.loads(await resolve_account(service_name="pdf-export-service"))
+
+        assert result["status"] == "FOUND"
+        assert "naming_convention" in result
+        nc = result["naming_convention"]
+        assert nc["separator"] == "/"
+        assert nc["env_position"] == "prefix"
+        assert nc["apm_to_k8s_namespace_map"] == {"eswd-prod": "prod"}
+        assert nc["k8s_deployment_name_format"] == "bare"
+
+    @pytest.mark.asyncio
+    async def test_resolve_returns_empty_naming_when_no_cache(self):
+        """resolve_account returns empty naming_convention when no cache."""
+        from tools.intelligence_tools import resolve_account, _cache
+
+        with patch.object(_cache, "get", return_value=None):
+            with patch.object(_cache, "get_stale", return_value=None):
+                result = json.loads(await resolve_account(service_name="pdf-export-service"))
+
+        assert result["status"] == "FOUND"
+        assert "naming_convention" in result
+        assert result["naming_convention"] == {}

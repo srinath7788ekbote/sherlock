@@ -244,15 +244,18 @@ async def connect_account(
             _credential_manager.save_profile(profile_name, account_id, api_key, region)
 
         # Check cache first.
+        intelligence_source = "fresh_learn"  # default: full learn needed
         cached = _cache.get(account_id)
         if cached:
             intelligence = AccountIntelligence(**cached)
+            intelligence_source = "cached"
             logger.info("Using cached intelligence for account %s", account_id)
         else:
             # Try stale cache for fast startup, then refresh in background.
             stale = _cache.get_stale(account_id)
             if stale:
                 intelligence = AccountIntelligence(**stale)
+                intelligence_source = "stale_with_bg_refresh"
                 logger.info(
                     "Using stale intelligence for account %s; "
                     "scheduling background refresh",
@@ -262,6 +265,7 @@ async def connect_account(
             else:
                 intelligence = await learn_account(credentials)
                 _cache.set(account_id, intelligence.model_dump(mode="json"))
+                intelligence_source = "fresh_learn"
 
         # Update persistent account memory.
         try:
@@ -332,8 +336,32 @@ async def connect_account(
                 "azure_resources": intelligence.entity_counts.azure_resource_count,
             },
             "dependency_graph": dep_graph_status,
+            "intelligence_source": intelligence_source,
+            "naming_convention": {
+                "separator": intelligence.naming_convention.separator,
+                "env_position": intelligence.naming_convention.env_position,
+                "env_values": intelligence.naming_convention.env_values[:10],
+                "apm_to_k8s_namespace_map": (
+                    intelligence.naming_convention.apm_to_k8s_namespace_map
+                ),
+                "k8s_deployment_name_format": (
+                    intelligence.naming_convention.k8s_deployment_name_format
+                ),
+                "segment_roles": intelligence.naming_convention.segment_roles,
+            },
             "duration_ms": duration_ms,
         }
+
+        # Help the AI decide whether learn_account is needed
+        if intelligence_source in ("cached", "stale_with_bg_refresh"):
+            result["skip_learn_account"] = True
+            result["skip_learn_reason"] = (
+                f"Intelligence loaded from {intelligence_source}. "
+                "Service names, namespaces, and naming conventions are already known. "
+                "Calling learn_account is unnecessary — proceed directly to investigation."
+            )
+        else:
+            result["skip_learn_account"] = False
 
         # Cross-account entity warning
         if intelligence.cross_account_entities:
@@ -372,18 +400,48 @@ async def connect_account(
         })
 
 
-async def learn_account_tool() -> str:
-    """Re-learn the active account's structure (force refresh).
+async def learn_account_tool(force: bool = False) -> str:
+    """Re-learn the active account's structure.
 
-    Invalidates the cache and re-discovers all account data.
+    When fresh intelligence is already cached, returns it immediately
+    without re-querying New Relic — making this safe to call from any
+    MCP client regardless of whether it checks ``skip_learn_account``.
+
+    Pass ``force=True`` to bypass the cache and force a full re-learn.
+
+    Args:
+        force: If True, always invalidate cache and re-learn.
+               If False (default), return cached intelligence when available.
 
     Returns:
-        JSON string with updated account summary.
+        JSON string with account summary.
     """
     start = time.time()
     try:
         ctx = AccountContext()
         credentials, _ = ctx.get_active()
+
+        # Server-side guardrail: skip re-learn when cache is fresh.
+        if not force:
+            cached = _cache.get(credentials.account_id)
+            if cached:
+                intelligence = AccountIntelligence(**cached)
+                ctx.set_active(credentials, intelligence)
+                duration_ms = int((time.time() - start) * 1000)
+                return json.dumps({
+                    "status": "already_learned",
+                    "account_id": credentials.account_id,
+                    "total_entities": intelligence.entity_counts.total_entities,
+                    "apm_services": intelligence.account_meta.total_apm_services,
+                    "otel_services": intelligence.otel.service_count,
+                    "k8s_namespaces": len(intelligence.k8s.namespaces),
+                    "duration_ms": duration_ms,
+                    "hint": (
+                        "Intelligence is already cached. "
+                        "Proceeding to investigation. "
+                        "Use force=True to re-learn."
+                    ),
+                })
 
         _cache.invalidate(credentials.account_id)
         intelligence = await learn_account(credentials)
@@ -657,6 +715,21 @@ async def resolve_account(service_name: str) -> str:
     entry = memory.lookup_service(service_name)
 
     if entry and not memory.is_stale(service_name):
+        # Try to load naming convention from intelligence cache
+        naming_info = {}
+        try:
+            cached = _cache.get(entry.account_id) or _cache.get_stale(entry.account_id)
+            if cached:
+                nc = cached.get("naming_convention", {})
+                naming_info = {
+                    "separator": nc.get("separator"),
+                    "env_position": nc.get("env_position"),
+                    "apm_to_k8s_namespace_map": nc.get("apm_to_k8s_namespace_map", {}),
+                    "k8s_deployment_name_format": nc.get("k8s_deployment_name_format", "bare"),
+                }
+        except Exception:
+            pass
+
         return json.dumps({
             "status": "FOUND",
             "service_name": service_name,
@@ -666,6 +739,7 @@ async def resolve_account(service_name: str) -> str:
             "region": entry.region,
             "last_seen": entry.last_seen.isoformat(),
             "action": f"connect_account(profile_name=\"{entry.profile_name}\")",
+            "naming_convention": naming_info,
             "message": (
                 f"Service '{service_name}' was last seen in account "
                 f"'{entry.account_name}' ({entry.account_id}). "

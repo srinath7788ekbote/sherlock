@@ -103,21 +103,43 @@ Before spawning any domain agent, the Team Lead MUST complete these steps:
 STEP 0.0: mcp_sherlock_resolve_account(service_name)
           → Check if the service's account is already known in memory.
           → If FOUND, use the returned profile_name in the next step.
+          → If FOUND and naming_convention is returned, note the
+            apm_to_k8s_namespace_map for namespace resolution.
           → If NOT_FOUND, proceed with default profile.
-STEP 0.1: mcp_sherlock_connect_account (if not already connected)
-          → Use profile_name from Step 0.0 if available, or service_name param
-            for auto-resolution.
-STEP 0.2: mcp_sherlock_learn_account()
-          → Discovers ALL entity names, types, and relationships in the account.
-          → Caches the results for all subsequent agent calls.
-          → This is how you know the REAL service names, K8s entity names, etc.
-STEP 0.3: Parse the service name provided by the user:
-          → If it contains "/" → full_name="eswd-prod/sifi-adapter",
-            bare_name="sifi-adapter", namespace="eswd-prod"
-          → If it has NO "/" → bare_name=full_name, namespace=None
-STEP 0.4: mcp_sherlock_get_nrql_context(domain="all")
-          → Get real attribute names and event types available in this account.
-          → Pass these to agents so they use correct NRQL attribute names.
+
+STEP 0.1: mcp_sherlock_connect_account(profile_name=<from 0.0>)
+          → If connect_account returns skip_learn_account: true,
+            DO NOT call learn_account — proceed directly to Step 0.3.
+          → If connect_account returns skip_learn_account: false (fresh learn),
+            the account was just learned — proceed to Step 0.3.
+
+STEP 0.2: mcp_sherlock_learn_account() — ONLY if:
+          - connect_account returned intelligence_source: "fresh_learn" AND
+            the response was an error (e.g. credentials failed), OR
+          - You explicitly need to force-refresh entity discovery
+            (pass force=True to bypass the server-side cache guardrail)
+          → In normal flow, this step is SKIPPED when connect_account
+            already loaded intelligence from cache.
+          → Server-side guardrail: even if called redundantly with
+            force=False (default), the tool returns already_learned
+            immediately without re-querying NR.
+
+STEP 0.3: Parse the service name for agent dispatch:
+          → If it contains "/" → full_name = the complete string
+          → bare_name = text after the last "/"
+          → DO NOT manually extract namespace from the APM name.
+            The K8s tool resolves the actual K8s namespace automatically
+            using NamingConvention.apm_to_k8s_namespace_map.
+          → For APM tools: use the full_name (e.g. "eswd-prod/tagging-service")
+          → For K8s tools: pass service_name=bare_name, DO NOT pass namespace.
+            The tool will use the naming convention to find the right namespace.
+            Server-side guardrail: even if a wrong namespace is passed, the tool
+            overrides it with the NamingConvention mapping when available.
+          → For Log tools: use the full_name (entity.name in NR uses APM name)
+
+STEP 0.4: mcp_sherlock_get_nrql_context(domain="all") — OPTIONAL
+          → Get real attribute names and event types available.
+          → Can be skipped for speed if intelligence is already cached.
 ```
 
 > **Static vs Dynamic Context:** Instructions in `copilot-instructions.md` above
@@ -126,26 +148,7 @@ STEP 0.4: mcp_sherlock_get_nrql_context(domain="all")
 > changes every investigation. Never carry over runtime context from a previous
 > investigation without re-verifying.
 
-**NEVER skip Steps 0.1-0.3. Step 0.4 is recommended but can be skipped for speed.**
-
-### Step 1b — Force Account Learning (MANDATORY)
-
-After connecting, ALWAYS call learn_account to discover entities and detect
-cross-account services:
-
-```
-mcp_sherlock_learn_account()
-```
-
-**Why this is mandatory:**
-- Cross-account entity detection (Step 1c) ONLY works after learn_account runs
-- Without learn_account, OTel services and services in other accounts are invisible
-- connect_account alone does NOT trigger entity discovery
-- If learn_account was called recently (response includes "Using cached intelligence"),
-  that is fine — the cache is valid and cross-account entities are already known
-
-**Never skip this step.** Even if you believe the account is already learned,
-call it — the response will be instant from cache if already up to date.
+**NEVER skip Steps 0.0-0.1. Step 0.2 is only needed for force-refresh. Step 0.4 is recommended but can be skipped for speed.**
 
 ### Step 1c — Cross-Account Entity Check (MANDATORY)
 
@@ -267,14 +270,16 @@ Spawn ALL 6 specialist agents simultaneously. Each receives the same context env
 CONTEXT ENVELOPE (pass to every agent):
   Service (full APM name): {full_name}
   Service (bare / K8s name): {bare_name}
-  Namespace: {namespace}
+  APM prefix: {text before "/"} — DO NOT use as K8s namespace directly
+  K8s namespace: resolved automatically by tools via NamingConvention
   Time window: {since_minutes} minutes
   Account entities discovered by learn_account: {entity_summary}
 ```
 
 ```
   sherlock-apm ──────→ get_service_golden_signals, get_app_metrics, get_deployments
-  sherlock-k8s ──────→ get_k8s_health(bare_name, namespace), NRQL fallbacks (5-step)
+  sherlock-k8s ──────→ get_k8s_health(service_name=bare_name), NRQL fallbacks (5-step)
+                       DO NOT pass namespace — the tool resolves it from NamingConvention
   sherlock-logs ─────→ search_logs, NRQL severity distribution
   sherlock-alerts ───→ get_service_incidents, get_incidents(open)
   sherlock-synthetics → get_synthetic_monitors, get_monitor_status
